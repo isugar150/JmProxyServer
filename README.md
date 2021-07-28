@@ -1,7 +1,8 @@
 # JmProxyServer
 
 ## 특징
-JmProxyServer는 프록시 프로그램이며, 쉬운 설정, 국가 및 내부망 기반으로 접속을 차단합니다.
+JmProxyServer는 프록시 프로그램이며, 쉬운 설정, 국가 및 내부망 기반으로 접속을 차단합니다.  
+주의: 국가별로 차단시 프록시 서버가 Super DMZ에 위치해야합니다.
 
 ## Preview
 ![image](https://user-images.githubusercontent.com/13088077/127341209-05c587d2-4ab2-4275-89ca-46f6aed8a8be.png)  
