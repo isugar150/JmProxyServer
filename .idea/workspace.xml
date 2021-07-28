@@ -6,25 +6,10 @@
     </artifacts-to-build>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="c7718964-0505-42c5-af96-4936118c68be" name="디폴트 변경 목록" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/artifacts/JmProxyServer_jar.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/runConfigurations.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/config/application.yml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/lib/snakeyaml-1.29.jar" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/META-INF/MANIFEST.MF" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/com/namejm/proxy/NonAuthorizationException.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyDto.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyMain.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/libraries/logback_classic_1_2_4.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/libraries/logback_classic_1_2_4.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/modules.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
+    <list default="true" id="c7718964-0505-42c5-af96-4936118c68be" name="디폴트 변경 목록" comment="- 멀티 쓰래드로 프로그램 작동하게끔 구현&#10;- Config yml추가">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/JmProxyServer1.iml" beforeDir="false" afterPath="$PROJECT_DIR$/JmProxyServer.iml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/hs_err_pid17180.log" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/JmProxyServer1/com/namejm/proxy/ProxyServer.class" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/JmProxyServer1/com/namejm/proxy/ThreadProxy$1.class" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/out/production/JmProxyServer1/com/namejm/proxy/ThreadProxy.class" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyServer.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyServer.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/com/namejm/proxy/ThreadProxy.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/config/application.yml" beforeDir="false" afterPath="$PROJECT_DIR$/config/application.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyMain.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyMain.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -110,19 +95,6 @@
         <option name="Make" enabled="true" />
       </method>
     </configuration>
-    <configuration default="true" type="JetRunConfigurationType">
-      <module name="JmProxyServer" />
-      <method v="2">
-        <option name="Make" enabled="true" />
-      </method>
-    </configuration>
-    <configuration default="true" type="KotlinStandaloneScriptRunConfigurationType">
-      <module name="JmProxyServer" />
-      <option name="filePath" />
-      <method v="2">
-        <option name="Make" enabled="true" />
-      </method>
-    </configuration>
   </component>
   <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="애플리케이션 수준" UseSingleDictionary="true" transferred="true" />
   <component name="TaskManager">
@@ -139,7 +111,18 @@
       <workItem from="1627466057859" duration="70000" />
       <workItem from="1627466139204" duration="522000" />
       <workItem from="1627466926556" duration="15448000" />
+      <workItem from="1627482676492" duration="51000" />
+      <workItem from="1627482754122" duration="9000" />
+      <workItem from="1627482822961" duration="780000" />
     </task>
+    <task id="LOCAL-00001" summary="- 멀티 쓰래드로 프로그램 작동하게끔 구현&#10;- Config yml추가">
+      <created>1627482721392</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1627482721392</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -159,5 +142,7 @@
   </component>
   <component name="VcsManagerConfiguration">
     <option name="ADD_EXTERNAL_FILES_SILENTLY" value="true" />
+    <MESSAGE value="- 멀티 쓰래드로 프로그램 작동하게끔 구현&#10;- Config yml추가" />
+    <option name="LAST_COMMIT_MESSAGE" value="- 멀티 쓰래드로 프로그램 작동하게끔 구현&#10;- Config yml추가" />
   </component>
 </project>

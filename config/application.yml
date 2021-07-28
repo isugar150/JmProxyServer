@@ -4,7 +4,7 @@ proxy:
 #   bindPort: 8080 # 바인드할 포트
 #   forwardHost: 10.1.3.200 # 전달할 서버의 아이피
 #   forwardPort: 21 # 전달할 서버의 포트
-#   allowedCountries: [private, local] # 국가코드: KR, JP 등등.., private: 내부망, local: 루프백
+#   allowedCountries: [private, localhost] # 국가코드: KR, JP 등등.., private: 내부망, localhost: 루프백
   - type: in
     name: sample-1
     bindPort: 8081

@@ -68,7 +68,7 @@ public class ProxyMain {
                         }
                     }
                     if (!keepOn) {
-                        logger.info("[{}][IN] Blocked non-allowed IP. (IP: {}) (Country/Division: {})", name, remoteSocketAddr, remoteSocketAddr, country);
+                        logger.info("[{}][IN] Blocked non-allowed IP. (IP: {}) (Country/Division: {})", name, remoteSocketAddr, country);
                         continue;
                     }
 
