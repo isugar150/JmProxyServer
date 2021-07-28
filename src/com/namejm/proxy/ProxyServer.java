@@ -25,8 +25,8 @@ public class ProxyServer {
 
         try {
             // and the local port that we listen for connections on
-            String host = "10.1.3.200";
-            int remoteport = 80;
+            String host = "10.1.3.130";
+            int remoteport = 30000;
             int localport = 8080;
             // Print a start-up message
             logger.info("Starting inbound proxy for {}:{} on port {}", host, remoteport, localport);

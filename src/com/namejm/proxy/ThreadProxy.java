@@ -42,7 +42,12 @@ public class ThreadProxy extends Thread {
                 try{
                     locale = InetAddressLocator.getLocale(remoteSocketAddr);
                 } catch (InetAddressLocatorException e) { locale = null; }
-                String country = locale.getCountry().equals("**") ? "unknwon" : locale.getCountry();
+                String country = locale.getCountry();
+                if(remoteSocketAddr.equals("127.0.0.1")){
+                    country = "local";
+                } else if(country.equals("**")){
+                    country = "private";
+                }
 
                 logger.info("[IN] [{}:{}]({}) => [{}:{}] => [{}:{}])", remoteSocketAddr, remoteSocketPort, country, localSocketAddr, localSocketPort, SERVER_URL, SERVER_PORT);
             } catch (IOException e) {
