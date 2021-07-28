@@ -5,7 +5,7 @@ JmProxyServer는 프록시 프로그램이며, 쉬운 설정, 국가 및 내부�
 주의: 국가별로 차단시 프록시 서버가 Super DMZ에 위치해야합니다.
 
 ## Preview
-![image](https://user-images.githubusercontent.com/13088077/127343301-44999e7f-5474-456f-ba73-4b12eff31943.png)  
+![image](https://user-images.githubusercontent.com/13088077/127344946-e0eb0144-2ef5-4c58-bcb7-290e19d95fa2.png)  
 [구동 화면]  
 
 ## 설정 방법
