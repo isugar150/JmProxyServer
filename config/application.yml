@@ -1,0 +1,19 @@
+proxy:
+# - type: in # in: 인바운드, out: 아웃바운드
+#   name: sample-1 # 프록시의 이름
+#   bindPort: 8080 # 바인드할 포트
+#   forwardHost: 10.1.3.200 # 전달할 서버의 아이피
+#   forwardPort: 21 # 전달할 서버의 포트
+#   allowedCountries: [private, local] # 국가코드: KR, JP 등등.., private: 내부망, local: 루프백
+  - type: in
+    name: sample-1
+    bindPort: 8081
+    forwardHost: 10.1.3.200
+    forwardPort: 21
+    allowedCountries: [private]
+  - type: out
+    name: sample-2
+    bindPort: 8082
+    forwardHost: 10.1.3.200
+    forwardPort: 2234
+    allowedCountries: [private, localhost]

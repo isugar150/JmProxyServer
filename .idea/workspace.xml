@@ -1,20 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
+  <component name="ArtifactsWorkspaceSettings">
+    <artifacts-to-build>
+      <artifact name="JmProxyServer:jar" />
+    </artifacts-to-build>
+  </component>
   <component name="ChangeListManager">
     <list default="true" id="c7718964-0505-42c5-af96-4936118c68be" name="디폴트 변경 목록" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/libraries/logback_classic_1_2_4.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/hs_err_pid17180.log" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/lib/inetaddresslocator-2.18.jar" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/lib/logback-classic-1.2.4.jar" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/lib/logback-core-1.2.4.jar" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/lib/slf4j-api-1.7.32.jar" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/resources/logback.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyServer.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/com/namejm/proxy/ThreadProxy.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/compiler.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/compiler.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/artifacts/JmProxyServer_jar.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/runConfigurations.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/config/application.yml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/lib/snakeyaml-1.29.jar" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/META-INF/MANIFEST.MF" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/com/namejm/proxy/NonAuthorizationException.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyDto.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyMain.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/libraries/logback_classic_1_2_4.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/libraries/logback_classic_1_2_4.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/modules.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/JmProxyServer1.iml" beforeDir="false" afterPath="$PROJECT_DIR$/JmProxyServer1.iml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/JmProxyServer1.iml" beforeDir="false" afterPath="$PROJECT_DIR$/JmProxyServer.iml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/hs_err_pid17180.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/JmProxyServer1/com/namejm/proxy/ProxyServer.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/JmProxyServer1/com/namejm/proxy/ThreadProxy$1.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/out/production/JmProxyServer1/com/namejm/proxy/ThreadProxy.class" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyServer.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyServer.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/com/namejm/proxy/ThreadProxy.java" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -39,6 +49,14 @@
       <filtered-out-file-type name="COMMIT_BY_MESSAGE" />
     </file-type-list>
   </component>
+  <component name="GithubPullRequestsUISettings">
+    <option name="selectedUrlAndAccountId">
+      <UrlAndAccount>
+        <option name="accountId" value="90f0e466-e6e9-4785-8104-ca4e91ce67af" />
+        <option name="url" value="https://github.com/isugar150/JmProxyServer.git" />
+      </UrlAndAccount>
+    </option>
+  </component>
   <component name="ProjectId" id="1vtSCSLp1mobCEO6JjtwF1JIfsi" />
   <component name="ProjectLevelVcsManager">
     <ConfirmationsSetting value="2" id="Add" />
@@ -53,17 +71,19 @@
     <property name="SHARE_PROJECT_CONFIGURATION_FILES" value="true" />
     <property name="WebServerToolWindowFactoryState" value="false" />
     <property name="aspect.path.notification.shown" value="true" />
-    <property name="last_opened_file_path" value="$PROJECT_DIR$/lib/inetaddresslocator-2.18.jar" />
-    <property name="project.structure.last.edited" value="라이브러리" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/lib/json-simple-1.1.1.jar" />
+    <property name="project.structure.last.edited" value="아티팩트" />
     <property name="project.structure.proportion" value="0.15" />
     <property name="project.structure.side.proportion" value="0.2" />
-    <property name="settings.editor.selected.configurable" value="editor.preferences.fonts.default" />
+    <property name="restartRequiresConfirmation" value="false" />
+    <property name="settings.editor.selected.configurable" value="configurable.group.appearance" />
   </component>
   <component name="ReaderModeSettings">
     <option name="showLigatures" value="true" />
   </component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\Users\o0_0o\Documents\GitHub\JmProxyServer\lib" />
       <recent name="C:\Users\JMKIM\Documents\GitHub\JmProxyServer\lib" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
@@ -71,14 +91,6 @@
     </key>
   </component>
   <component name="RunManager">
-    <configuration name="ProxyServer" type="Application" factoryName="Application" nameIsGenerated="true">
-      <option name="MAIN_CLASS_NAME" value="com.namejm.proxy.ProxyServer" />
-      <module name="JmProxyServer1" />
-      <option name="VM_PARAMETERS" value="-Djava.net.preferIPv4Stack=true -Dfile.encoding=UTF-8" />
-      <method v="2">
-        <option name="Make" enabled="true" />
-      </method>
-    </configuration>
     <configuration default="true" type="ArquillianJUnit" factoryName="" nameIsGenerated="true">
       <option name="arquillianRunConfiguration">
         <value>
@@ -86,6 +98,27 @@
         </value>
       </option>
       <option name="TEST_OBJECT" value="class" />
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="ProxyServer" type="Application" factoryName="Application" nameIsGenerated="true">
+      <option name="MAIN_CLASS_NAME" value="com.namejm.proxy.ProxyServer" />
+      <module name="JmProxyServer" />
+      <option name="VM_PARAMETERS" value="-Djava.net.preferIPv4Stack=true -Dfile.encoding=UTF-8" />
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+    <configuration default="true" type="JetRunConfigurationType">
+      <module name="JmProxyServer" />
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+    <configuration default="true" type="KotlinStandaloneScriptRunConfigurationType">
+      <module name="JmProxyServer" />
+      <option name="filePath" />
       <method v="2">
         <option name="Make" enabled="true" />
       </method>
@@ -101,6 +134,11 @@
       <updated>1627379765168</updated>
       <workItem from="1627379766287" duration="4000" />
       <workItem from="1627379789099" duration="2812000" />
+      <workItem from="1627465973845" duration="18000" />
+      <workItem from="1627465998575" duration="50000" />
+      <workItem from="1627466057859" duration="70000" />
+      <workItem from="1627466139204" duration="522000" />
+      <workItem from="1627466926556" duration="15448000" />
     </task>
     <servers />
   </component>
@@ -117,6 +155,7 @@
         </entry>
       </map>
     </option>
+    <option name="oldMeFiltersMigrated" value="true" />
   </component>
   <component name="VcsManagerConfiguration">
     <option name="ADD_EXTERNAL_FILES_SILENTLY" value="true" />
