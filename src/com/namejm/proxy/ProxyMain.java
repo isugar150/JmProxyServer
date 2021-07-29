@@ -62,7 +62,7 @@ public class ProxyMain {
 
                     boolean keepOn = false;
                     for (int i = 0; i < allowedCountries.length; i++) {
-                        if (allowedCountries[i].equals(country)) {
+                        if (allowedCountries[i].equals(country) || allowedCountries[i].equals("Any")) {
                             keepOn = true;
                             break;
                         }
