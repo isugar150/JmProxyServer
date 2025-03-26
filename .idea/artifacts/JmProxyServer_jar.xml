@@ -3,10 +3,11 @@
     <output-path>$PROJECT_DIR$/out/artifacts/JmProxyServer_jar</output-path>
     <root id="archive" name="JmProxyServer.jar">
       <element id="module-output" name="JmProxyServer" />
+      <element id="extracted-dir" path="$PROJECT_DIR$/lib/geoip2-4.2.1.jar" path-in-jar="/" />
       <element id="extracted-dir" path="$PROJECT_DIR$/lib/logback-classic-1.2.4.jar" path-in-jar="/" />
       <element id="extracted-dir" path="$PROJECT_DIR$/lib/logback-core-1.2.4.jar" path-in-jar="/" />
+      <element id="extracted-dir" path="$PROJECT_DIR$/lib/lombok-1.18.36.jar" path-in-jar="/" />
       <element id="extracted-dir" path="$PROJECT_DIR$/lib/slf4j-api-1.7.32.jar" path-in-jar="/" />
-      <element id="extracted-dir" path="$PROJECT_DIR$/lib/inetaddresslocator-2.18.jar" path-in-jar="/" />
       <element id="extracted-dir" path="$PROJECT_DIR$/lib/snakeyaml-1.29.jar" path-in-jar="/" />
     </root>
   </artifact>

@@ -1,6 +1,5 @@
 package com.namejm.proxy;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -9,13 +8,11 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-import com.namejm.proxy.ProxyDto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,12 +34,12 @@ public class ProxyMain {
     }
 
     public void start() throws IOException {
-        // 더 정교한 스레드 풀 설정
+        // 스레드 풀 설정
         int corePoolSize = Runtime.getRuntime().availableProcessors();
         int maxPoolSize = corePoolSize * 2;
         long keepAliveTime = 60L;
 
-        // 대기 큐와 거부 핸들러 추가
+        // 대기 큐와 거부 핸들러
         LinkedBlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<>(500);
         RejectedExecutionHandler rejectionHandler = new ThreadPoolExecutor.CallerRunsPolicy();
 
@@ -75,9 +72,8 @@ public class ProxyMain {
                 Socket clientSocket = serverSocket.accept();
 
                 // 타임아웃 설정
-                clientSocket.setSoTimeout(30000); // 30초 타임아웃
+                clientSocket.setSoTimeout(30000);
 
-                // 연결 처리 태스크 제출
                 executorService.submit(() -> handleConnection(clientSocket));
             } catch (IOException e) {
                 if (isRunning) {
@@ -95,23 +91,18 @@ public class ProxyMain {
             // 연결 허용 체크
             connectionAllowed = isAllowedConnection(clientSocket);
 
-            // 연결 로깅
-            logConnection(clientSocket, null, connectionAllowed);
+            logConnection(clientSocket, connectionAllowed);
 
             if (!connectionAllowed) {
                 return;
             }
-
-            // 목적지 서버 연결
             serverSocket = createServerConnection();
 
-            // 양방향 데이터 전송
             transferData(clientSocket, serverSocket);
 
         } catch (Exception e) {
             logger.error("Connection processing error", e);
         } finally {
-            // 리소스 안전하게 닫기
             closeQuietly(clientSocket);
             closeQuietly(serverSocket);
         }
@@ -123,13 +114,12 @@ public class ProxyMain {
             config.getForwardPort()
         );
 
-        // 서버 소켓 타임아웃 설정
-        serverSocket.setSoTimeout(30000); // 30초 타임아웃
+        serverSocket.setSoTimeout(30000);
 
         return serverSocket;
     }
 
-    private void logConnection(Socket clientSocket, Socket serverSocket, boolean allowed) {
+    private void logConnection(Socket clientSocket, boolean allowed) {
         try {
             String remoteAddr = clientSocket.getInetAddress().getHostAddress();
             int remotePort = clientSocket.getPort();
@@ -249,7 +239,6 @@ public class ProxyMain {
                 byte[] buffer = new byte[4096];
                 int bytesRead;
 
-                // 지속적인 데이터 전송
                 while ((bytesRead = in.read(buffer)) != -1) {
                     out.write(buffer, 0, bytesRead);
                     out.flush();
@@ -269,7 +258,6 @@ public class ProxyMain {
                     logger.debug("{} transfer completed", threadName);
                 }
             } finally {
-                // 입력, 출력 스트림 안전하게 닫기
                 try {
                     in.close();
                 } catch (IOException e) {
@@ -283,8 +271,6 @@ public class ProxyMain {
                 }
             }
         }, threadName);
-
-        // 데몬 스레드로 설정 (메인 스레드 종료 시 자동 종료)
         thread.setDaemon(true);
 
         return thread;
@@ -295,7 +281,6 @@ public class ProxyMain {
         isRunning = false;
 
         try {
-            // 서버 소켓 닫기
             if (serverSocket != null) {
                 serverSocket.close();
             }
@@ -303,7 +288,6 @@ public class ProxyMain {
             logger.warn("Error closing server socket", e);
         }
 
-        // 스레드 풀 종료
         if (executorService != null) {
             executorService.shutdown();
             try {
