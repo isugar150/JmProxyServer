@@ -9,5 +9,7 @@
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="library" name="logback-classic-1.2.4" level="project" />
+    <orderEntry type="library" name="geoip2-4.2.1" level="project" />
+    <orderEntry type="library" name="lombok-1.18.36" level="project" />
   </component>
 </module>

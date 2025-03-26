@@ -8,9 +8,9 @@ proxy:
   - type: in
     name: sample-1
     bindPort: 8081
-    forwardHost: 10.1.3.130
-    forwardPort: 30500
-    allowedCountries: [private]
+    forwardHost: localhost
+    forwardPort: 4000
+    allowedCountries: [private, localhost]
   - type: out
     name: sample-2
     bindPort: 8082
