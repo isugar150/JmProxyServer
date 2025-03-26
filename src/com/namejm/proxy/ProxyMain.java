@@ -1,49 +1,87 @@
 package com.namejm.proxy;
 
-import com.namejm.proxy.ProxyDto;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionHandler;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+import com.namejm.proxy.ProxyDto;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import lombok.RequiredArgsConstructor;
+
+import static ch.qos.logback.core.util.CloseUtil.closeQuietly;
 
 @RequiredArgsConstructor
 public class ProxyMain {
     private static final Logger logger = LoggerFactory.getLogger(ProxyMain.class);
 
-    private final ProxyDto config;
-    private final ExecutorService executorService;
+    private ProxyDto config;
+    private ExecutorService executorService;
+    private ServerSocket serverSocket;
+    private volatile boolean isRunning = true;
 
-    public ProxyMain(ProxyDto config) throws IOException {
+    public ProxyMain(ProxyDto config) {
         this.config = config;
-        // 스레드 풀 생성 - 동시 연결 처리
-        this.executorService = Executors.newFixedThreadPool(
-            Runtime.getRuntime().availableProcessors() * 2
-        );
-        startProxyServer();
     }
 
-    private void startProxyServer() throws IOException {
-        try (ServerSocket ss = new ServerSocket(config.getBindPort())) {
-            logger.info("Proxy server started on port {}", config.getBindPort());
+    public void start() throws IOException {
+        // 더 정교한 스레드 풀 설정
+        int corePoolSize = Runtime.getRuntime().availableProcessors();
+        int maxPoolSize = corePoolSize * 2;
+        long keepAliveTime = 60L;
 
-            while (!Thread.currentThread().isInterrupted()) {
-                try {
-                    Socket clientSocket = ss.accept();
-                    // 각 연결을 별도 스레드로 처리
-                    executorService.submit(() -> handleConnection(clientSocket));
-                } catch (IOException e) {
-                    logger.warn("Error accepting connection", e);
+        // 대기 큐와 거부 핸들러 추가
+        LinkedBlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<>(500);
+        RejectedExecutionHandler rejectionHandler = new ThreadPoolExecutor.CallerRunsPolicy();
+
+        executorService = new ThreadPoolExecutor(
+            corePoolSize,
+            maxPoolSize,
+            keepAliveTime,
+            TimeUnit.SECONDS,
+            workQueue,
+            rejectionHandler
+        );
+
+        // 서버 소켓 생성 및 설정
+        serverSocket = new ServerSocket(config.getBindPort());
+        serverSocket.setReuseAddress(true);
+
+        logger.info("Proxy server started on port {} with thread pool: core={}, max={}",
+            config.getBindPort(), corePoolSize, maxPoolSize);
+
+        // 연결 수락 스레드
+        Thread acceptThread = new Thread(this::acceptConnections);
+        acceptThread.setName("ProxyAcceptThread-" + config.getBindPort());
+        acceptThread.start();
+    }
+
+    private void acceptConnections() {
+        while (isRunning && !Thread.currentThread().isInterrupted()) {
+            try {
+                // 연결 수락
+                Socket clientSocket = serverSocket.accept();
+
+                // 타임아웃 설정
+                clientSocket.setSoTimeout(30000); // 30초 타임아웃
+
+                // 연결 처리 태스크 제출
+                executorService.submit(() -> handleConnection(clientSocket));
+            } catch (IOException e) {
+                if (isRunning) {
+                    logger.error("Error accepting connection", e);
                 }
             }
         }
@@ -51,121 +89,135 @@ public class ProxyMain {
 
     private void handleConnection(Socket clientSocket) {
         Socket serverSocket = null;
+        boolean connectionAllowed = false;
+
         try {
-            // IP 국가 필터링 로직
-            if (!isAllowedConnection(clientSocket)) {
-                logger.info("Connection blocked from IP: {}",
-                    clientSocket.getInetAddress().getHostAddress());
-                clientSocket.close();
+            // 연결 허용 체크
+            connectionAllowed = isAllowedConnection(clientSocket);
+
+            // 연결 로깅
+            logConnection(clientSocket, null, connectionAllowed);
+
+            if (!connectionAllowed) {
                 return;
             }
 
-            // 서버 연결
-            serverSocket = new Socket(config.getForwardHost(), config.getForwardPort());
-            logger.debug("Connection established: {} -> {}",
-                clientSocket.getInetAddress(),
-                serverSocket.getInetAddress());
+            // 목적지 서버 연결
+            serverSocket = createServerConnection();
 
-            // 양방향 데이터 전송을 위한 스레드 생성
-            Thread clientToServerThread = createDataTransferThread(
-                clientSocket.getInputStream(),
-                serverSocket.getOutputStream(),
-                "Client-to-Server"
-            );
-            Thread serverToClientThread = createDataTransferThread(
-                serverSocket.getInputStream(),
-                clientSocket.getOutputStream(),
-                "Server-to-Client"
-            );
-
-            clientToServerThread.start();
-            serverToClientThread.start();
-
-            // 스레드가 종료될 때까지 대기
-            clientToServerThread.join();
-            serverToClientThread.join();
+            // 양방향 데이터 전송
+            transferData(clientSocket, serverSocket);
 
         } catch (Exception e) {
             logger.error("Connection processing error", e);
         } finally {
-            // 소켓 안전하게 닫기
+            // 리소스 안전하게 닫기
             closeQuietly(clientSocket);
             closeQuietly(serverSocket);
         }
     }
 
-    private Thread createDataTransferThread(
-        InputStream in,
-        OutputStream out,
-        String threadName
-    ) {
-        Thread thread = new Thread(() -> {
-            try {
-                byte[] buffer = new byte[4096];
-                int bytesRead;
-                while ((bytesRead = in.read(buffer)) != -1) {
-                    out.write(buffer, 0, bytesRead);
-                    out.flush();
-                }
-            } catch (IOException e) {
-                logger.debug("{} transfer interrupted", threadName, e);
-            }
-        }, threadName);
-        return thread;
+    private Socket createServerConnection() throws IOException {
+        Socket serverSocket = new Socket(
+            config.getForwardHost(),
+            config.getForwardPort()
+        );
+
+        // 서버 소켓 타임아웃 설정
+        serverSocket.setSoTimeout(30000); // 30초 타임아웃
+
+        return serverSocket;
     }
 
-    private boolean isAllowedConnection(Socket clientSocket) throws Exception {
+    private void logConnection(Socket clientSocket, Socket serverSocket, boolean allowed) {
+        try {
+            String remoteAddr = clientSocket.getInetAddress().getHostAddress();
+            int remotePort = clientSocket.getPort();
+
+            Locale locale = InetAddressLocator.getLocale(remoteAddr);
+            String country = locale.getCountry();
+
+            logger.info("Connection {} - IP: {}, Port: {}, Country: {}",
+                allowed ? "ALLOWED" : "BLOCKED",
+                remoteAddr,
+                remotePort,
+                country
+            );
+        } catch (Exception e) {
+            logger.warn("Connection logging error", e);
+        }
+    }
+
+    private void transferData(Socket clientSocket, Socket serverSocket) throws Exception {
+        // 데이터 전송 스레드 생성
+        Thread clientToServerThread = createDataTransferThread(
+            clientSocket.getInputStream(),
+            serverSocket.getOutputStream(),
+            "Client-to-Server"
+        );
+
+        Thread serverToClientThread = createDataTransferThread(
+            serverSocket.getInputStream(),
+            clientSocket.getOutputStream(),
+            "Server-to-Client"
+        );
+
+        // 스레드 시작
+        clientToServerThread.start();
+        serverToClientThread.start();
+
+        // 스레드 종료 대기 (타임아웃 포함)
+        clientToServerThread.join(30000);
+        serverToClientThread.join(30000);
+    }
+
+    // 기존의 데이터 전송 스레드 메서드 유지
+
+    private boolean isAllowedConnection(Socket clientSocket) {
         String remoteAddr = clientSocket.getInetAddress().getHostAddress();
 
-        // 국가 확인 로직
-        Locale locale = InetAddressLocator.getLocale(remoteAddr);
-        String country = locale.getCountry();
+        try {
+            // 국가 확인
+            Locale locale = InetAddressLocator.getLocale(remoteAddr);
+            String country = locale.getCountry();
 
-        // 허용 조건 체크
-        boolean isAllowed = false;
-        for (String allowedCondition : config.getAllowedCountries()) {
-            switch (allowedCondition) {
-                case "Any":
-                    isAllowed = true;
-                    break;
-                case "localhost":
-                    isAllowed |= remoteAddr.equals("127.0.0.1");
-                    break;
-                case "private":
-                    isAllowed |= isPrivateIP(remoteAddr);
-                    break;
-                default:
-                    isAllowed |= allowedCondition.equals(country);
+            // 허용 조건 체크
+            for (String allowedCondition : config.getAllowedCountries()) {
+                switch (allowedCondition) {
+                    case "Any":
+                        return true;
+                    case "localhost":
+                        if (remoteAddr.equals("127.0.0.1")) return true;
+                        break;
+                    case "private":
+                        if (isPrivateIP(remoteAddr)) return true;
+                        break;
+                    default:
+                        // 국가 코드 확인
+                        if (allowedCondition.equals(country)) return true;
+                }
             }
 
-            // 이미 허용되었다면 루프 종료
-            if (isAllowed) break;
+            return false;
+        } catch (Exception e) {
+            logger.warn("Connection check failed for IP: {}", remoteAddr, e);
+            return false;
         }
-
-        logger.trace("Connection check - IP: {}, Country: {}, Allowed: {}",
-            remoteAddr, country, isAllowed);
-
-        return isAllowed;
     }
 
-    // Private IP 체크 메서드 추가
     private boolean isPrivateIP(String ipAddress) {
         try {
             // 로컬 네트워크 대역 체크
-            if (ipAddress.startsWith("192.168.") ||
-                ipAddress.startsWith("10.") ||
-                ipAddress.startsWith("172.16.")) {
-                return true;
-            }
-
-            // CIDR 표기법 체크 메서드
-            return isInSubnet(ipAddress, "192.168.0.0/24");
+            return ipAddress.startsWith("192.168.") ||
+                   ipAddress.startsWith("10.") ||
+                   ipAddress.startsWith("172.16.") ||
+                   ipAddress.startsWith("127.0.0.1") ||
+                   isInSubnet(ipAddress, "192.168.0.0/24");
         } catch (Exception e) {
             return false;
         }
     }
 
-    // CIDR 서브넷 체크 메서드
     private boolean isInSubnet(String ip, String subnet) {
         String[] parts = subnet.split("/");
         String netAddress = parts[0];
@@ -178,7 +230,6 @@ public class ProxyMain {
         return (ipLong & mask) == (netAddressLong & mask);
     }
 
-    // IP를 Long 값으로 변환
     private long ipToLong(String ipAddress) {
         String[] octets = ipAddress.split("\\.");
         long result = 0;
@@ -188,27 +239,81 @@ public class ProxyMain {
         return result;
     }
 
-    private void closeQuietly(Closeable closeable) {
-        if (closeable != null) {
+    private Thread createDataTransferThread(
+        InputStream in,
+        OutputStream out,
+        String threadName
+    ) {
+        Thread thread = new Thread(() -> {
             try {
-                closeable.close();
+                byte[] buffer = new byte[4096];
+                int bytesRead;
+
+                // 지속적인 데이터 전송
+                while ((bytesRead = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, bytesRead);
+                    out.flush();
+
+                    // 스레드 인터럽트 체크
+                    if (Thread.currentThread().isInterrupted()) {
+                        break;
+                    }
+                }
             } catch (IOException e) {
-                logger.warn("Error closing resource", e);
+                // 특정 예외 무시
+                if (!(e instanceof SocketException &&
+                      (e.getMessage().equals("Socket closed") ||
+                       e.getMessage().contains("Broken pipe")))) {
+                    logger.warn("{} transfer error", threadName, e);
+                } else {
+                    logger.debug("{} transfer completed", threadName);
+                }
+            } finally {
+                // 입력, 출력 스트림 안전하게 닫기
+                try {
+                    in.close();
+                } catch (IOException e) {
+                    logger.warn("Error closing input stream", e);
+                }
+
+                try {
+                    out.close();
+                } catch (IOException e) {
+                    logger.warn("Error closing output stream", e);
+                }
             }
-        }
+        }, threadName);
+
+        // 데몬 스레드로 설정 (메인 스레드 종료 시 자동 종료)
+        thread.setDaemon(true);
+
+        return thread;
     }
 
     // 서버 종료 메서드
     public void shutdown() {
-        logger.info("Shutting down proxy server");
-        executorService.shutdown();
+        isRunning = false;
+
         try {
-            if (!executorService.awaitTermination(800, TimeUnit.MILLISECONDS)) {
-                executorService.shutdownNow();
+            // 서버 소켓 닫기
+            if (serverSocket != null) {
+                serverSocket.close();
             }
-        } catch (InterruptedException e) {
-            executorService.shutdownNow();
-            Thread.currentThread().interrupt();
+        } catch (IOException e) {
+            logger.warn("Error closing server socket", e);
+        }
+
+        // 스레드 풀 종료
+        if (executorService != null) {
+            executorService.shutdown();
+            try {
+                if (!executorService.awaitTermination(10, TimeUnit.SECONDS)) {
+                    executorService.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                executorService.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
         }
     }
 }

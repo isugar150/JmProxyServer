@@ -44,7 +44,7 @@ public class ProxyServer {
                     @Override
                     public void run() {
                         try {
-                            new ProxyMain(config.get(count++));
+                            new ProxyMain(config.get(count++)).start();
                         } catch (IOException e) {
                             logger.error(e.getMessage());
                             StringWriter sw = new StringWriter();
