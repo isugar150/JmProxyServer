@@ -16,21 +16,20 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import lombok.RequiredArgsConstructor;
-
 import static ch.qos.logback.core.util.CloseUtil.closeQuietly;
 
-@RequiredArgsConstructor
 public class ProxyMain {
     private static final Logger logger = LoggerFactory.getLogger(ProxyMain.class);
 
-    private ProxyDto config;
-    private ExecutorService executorService;
-    private ServerSocket serverSocket;
-    private volatile boolean isRunning = true;
+    private static ProxyDto config = null;
+    private final InetAddressLocator inetAddressLocator;
+    private static ExecutorService executorService;
+    private static ServerSocket serverSocket;
+    private static volatile boolean isRunning = true;
 
-    public ProxyMain(ProxyDto config) {
+    public ProxyMain(ProxyDto config, InetAddressLocator inetAddressLocator) {
         this.config = config;
+        this.inetAddressLocator = inetAddressLocator;
     }
 
     public void start() throws IOException {
@@ -52,7 +51,6 @@ public class ProxyMain {
             rejectionHandler
         );
 
-        // 서버 소켓 생성 및 설정
         serverSocket = new ServerSocket(config.getBindPort());
         serverSocket.setReuseAddress(true);
 
@@ -123,25 +121,32 @@ public class ProxyMain {
         try {
             String remoteAddr = clientSocket.getInetAddress().getHostAddress();
             int remotePort = clientSocket.getPort();
+            String country = "UNKNOWN";
 
-            Locale locale = InetAddressLocator.getLocale(remoteAddr);
-            String country = locale.getCountry();
+            try {
+                Locale locale = inetAddressLocator.getLocale(remoteAddr); // 다시 조회 (개선 필요)
+                country = locale.getCountry();
 
+            } catch (Exception e) {
+                 logger.warn("Failed to get country for IP {} during logging", remoteAddr, e);
+            }
+
+            // 로그 메시지 포맷은 기존 유지 또는 필요시 수정
             if("UNKNOWN".equals(country)) {
-                logger.info("{} - Connection {} - IP: {}, Port: {}",
-                    config.getName(),
-                    allowed ? "ALLOWED" : "BLOCKED",
-                    remoteAddr,
-                    remotePort
-                );
+                 logger.info("{} - Connection {} - IP: {}, Port: {}",
+                     config.getName(),
+                     allowed ? "ALLOWED" : "BLOCKED",
+                     remoteAddr,
+                     remotePort
+                 );
             } else {
-                logger.info("{} - Connection {} - IP: {}, Port: {}, Country: {}",
-                    config.getName(),
-                    allowed ? "ALLOWED" : "BLOCKED",
-                    remoteAddr,
-                    remotePort,
-                    country
-                );
+                 logger.info("{} - Connection {} - IP: {}, Port: {}, Country: {}",
+                     config.getName(),
+                     allowed ? "ALLOWED" : "BLOCKED",
+                     remoteAddr,
+                     remotePort,
+                     country
+                 );
             }
         } catch (Exception e) {
             logger.warn("Connection logging error", e);
@@ -175,10 +180,11 @@ public class ProxyMain {
 
     private boolean isAllowedConnection(Socket clientSocket) {
         String remoteAddr = clientSocket.getInetAddress().getHostAddress();
+        Locale locale = null; // 초기화
 
         try {
             // 국가 확인
-            Locale locale = InetAddressLocator.getLocale(remoteAddr);
+            locale = inetAddressLocator.getLocale(remoteAddr);
             String country = locale.getCountry();
 
             // 허용 조건 체크
@@ -194,7 +200,9 @@ public class ProxyMain {
                         break;
                     default:
                         // 국가 코드 확인
-                        if (allowedCondition.equals(country)) return true;
+                        if (!"UNKNOWN".equals(country) && allowedCondition.equalsIgnoreCase(country)) { // 대소문자 무시 비교
+                             return true;
+                        }
                 }
             }
 
@@ -285,8 +293,12 @@ public class ProxyMain {
         return thread;
     }
 
+    public static ProxyDto getConfig() {
+        return config;
+    }
+
     // 서버 종료 메서드
-    public void shutdown() {
+    public static void shutdown() {
         isRunning = false;
 
         try {
