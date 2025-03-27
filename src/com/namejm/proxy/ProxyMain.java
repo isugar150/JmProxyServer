@@ -271,8 +271,6 @@ public class ProxyMain {
                       (e.getMessage().equals("Socket closed") ||
                        e.getMessage().contains("Broken pipe")))) {
                     logger.warn("{} transfer error", threadName, e);
-                } else {
-                    logger.debug("{} transfer completed", threadName);
                 }
             } finally {
                 try {

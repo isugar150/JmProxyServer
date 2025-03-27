@@ -1,35 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
+  <component name="ArtifactsWorkspaceSettings">
+    <artifacts-to-build>
+      <artifact name="JmProxyServer:jar" />
+    </artifacts-to-build>
+  </component>
   <component name="AutoImportSettings">
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="7b30f178-3e33-4e46-94fe-2eb216c1d445" name="변경" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/encodings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/libraries/lib.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/prettier.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/bin/startup.bat" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/bin/startup.sh" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/config/GeoLite2-Country.mmdb" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/lib/geoip2-4.2.1.jar" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/lib/maxmind-db-3.1.1.jar" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/.name" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/artifacts/JmProxyServer_jar.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/compiler.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/git_toolbox_blame.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/git_toolbox_prj.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/jarRepositories.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/libraries/geoip2_4_2_1.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/libraries/logback_classic_1_2_4.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/libraries/lombok_1_18_36.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/runConfigurations.xml" beforeDir="false" />
+    <list default="true" id="7b30f178-3e33-4e46-94fe-2eb216c1d445" name="변경" comment="로직 개선&#10;JDK 17이상">
+      <change afterPath="$PROJECT_DIR$/.idea/git_toolbox_prj.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/JmProxyServer.iml" beforeDir="false" afterPath="$PROJECT_DIR$/JmProxyServer.iml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/com/namejm/proxy/InetAddressLocator.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/com/namejm/proxy/InetAddressLocator.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyDto.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyDto.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyMain.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyMain.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyServer.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyServer.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/META-INF/MANIFEST.MF" beforeDir="false" afterPath="$PROJECT_DIR$/src/META-INF/MANIFEST.MF" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -63,6 +46,7 @@
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.git.unshallow": "true",
     "SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "SONARLINT_PRECOMMIT_ANALYSIS": "true",
     "com.github.patou.gitmoji.display-icon": "emoji",
     "com.github.patou.gitmoji.text-after-unicode": " ",
     "com.github.patou.gitmoji.use-unicode": "true",
@@ -75,7 +59,7 @@
     "node.js.selected.package.tslint": "(autodetect)",
     "nodejs_package_manager_path": "npm",
     "prettierjs.PrettierConfiguration.Package": "/Users/jmkim/.nvm/versions/node/v22.14.0/lib/node_modules/prettier",
-    "project.structure.last.edited": "라이브러리",
+    "project.structure.last.edited": "아티팩트",
     "project.structure.proportion": "0.15",
     "project.structure.side.proportion": "0.2",
     "settings.editor.selected.configurable": "settings.javascript.prettier",
@@ -91,7 +75,7 @@
   </component>
   <component name="RunManager">
     <configuration name="ProxyServer" type="Application" factoryName="Application" temporary="true" nameIsGenerated="true">
-      <option name="ALTERNATIVE_JRE_PATH" value="11" />
+      <option name="ALTERNATIVE_JRE_PATH" value="corretto-17" />
       <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="true" />
       <option name="MAIN_CLASS_NAME" value="com.namejm.proxy.ProxyServer" />
       <module name="JmProxyServer" />
@@ -129,11 +113,24 @@
       <option name="presentableId" value="Default" />
       <updated>1743037064717</updated>
       <workItem from="1743037065772" duration="2204000" />
-      <workItem from="1743039281530" duration="366000" />
+      <workItem from="1743039281530" duration="636000" />
     </task>
+    <task id="LOCAL-00001" summary="로직 개선&#10;JDK 17이상">
+      <option name="closed" value="true" />
+      <created>1743039705208</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1743039705208</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="로직 개선&#10;JDK 17이상" />
+    <option name="LAST_COMMIT_MESSAGE" value="로직 개선&#10;JDK 17이상" />
   </component>
 </project>
