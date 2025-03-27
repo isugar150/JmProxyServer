@@ -12,7 +12,6 @@ import java.util.Set;
 public class ProxyDto {
     private static final Logger logger = LoggerFactory.getLogger(ProxyDto.class);
     private static final Set<String> VALID_TYPES = new HashSet<>(Arrays.asList("in"));
-    private static final Set<String> RESERVED_COUNTRIES = new HashSet<>(Arrays.asList("any", "localhost", "private"));
 
     private String type;
     private String name;
@@ -96,7 +95,7 @@ public class ProxyDto {
                     valid = false;
                     break;
                 }
-                if (!RESERVED_COUNTRIES.contains(country) && !country.matches("^[a-zA-Z]{2}$")) {
+                if (!country.matches("^[a-zA-Z]{2}$")) {
                     logger.error("Invalid entry '{}' in allowedCountries for proxy '{}'. Must be a 2-letter country code or a reserved word (any, localhost, private).", country, name);
                     valid = false;
                 }
