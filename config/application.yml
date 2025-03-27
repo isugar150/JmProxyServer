@@ -11,9 +11,9 @@ proxy:
     forwardHost: localhost
     forwardPort: 4000
     allowedCountries: [private, localhost]
-  - type: out
+  - type: in
     name: sample-2
     bindPort: 8082
-    forwardHost: 10.1.3.130
-    forwardPort: 31500
+    forwardHost: localhost
+    forwardPort: 8080
     allowedCountries: [Any]

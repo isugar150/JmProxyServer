@@ -21,11 +21,11 @@ import static ch.qos.logback.core.util.CloseUtil.closeQuietly;
 public class ProxyMain {
     private static final Logger logger = LoggerFactory.getLogger(ProxyMain.class);
 
-    private static ProxyDto config = null;
+    private ProxyDto config = null;
     private final InetAddressLocator inetAddressLocator;
-    private static ExecutorService executorService;
-    private static ServerSocket serverSocket;
-    private static volatile boolean isRunning = true;
+    private ExecutorService executorService;
+    private ServerSocket serverSocket;
+    private volatile boolean isRunning = true;
 
     public ProxyMain(ProxyDto config, InetAddressLocator inetAddressLocator) {
         this.config = config;
@@ -124,14 +124,13 @@ public class ProxyMain {
             String country = "UNKNOWN";
 
             try {
-                Locale locale = inetAddressLocator.getLocale(remoteAddr); // 다시 조회 (개선 필요)
+                Locale locale = inetAddressLocator.getLocale(remoteAddr);
                 country = locale.getCountry();
 
             } catch (Exception e) {
                  logger.warn("Failed to get country for IP {} during logging", remoteAddr, e);
             }
 
-            // 로그 메시지 포맷은 기존 유지 또는 필요시 수정
             if("UNKNOWN".equals(country)) {
                  logger.info("{} - Connection {} - IP: {}, Port: {}",
                      config.getName(),
@@ -189,8 +188,8 @@ public class ProxyMain {
 
             // 허용 조건 체크
             for (String allowedCondition : config.getAllowedCountries()) {
-                switch (allowedCondition) {
-                    case "Any":
+                switch (allowedCondition.toLowerCase()) {
+                    case "any":
                         return true;
                     case "localhost":
                         if (remoteAddr.equals("127.0.0.1")) return true;
@@ -199,8 +198,7 @@ public class ProxyMain {
                         if (isPrivateIP(remoteAddr)) return true;
                         break;
                     default:
-                        // 국가 코드 확인
-                        if (!"UNKNOWN".equals(country) && allowedCondition.equalsIgnoreCase(country)) { // 대소문자 무시 비교
+                        if (!"UNKNOWN".equals(country) && allowedCondition.equalsIgnoreCase(country)) {
                              return true;
                         }
                 }
@@ -291,12 +289,12 @@ public class ProxyMain {
         return thread;
     }
 
-    public static ProxyDto getConfig() {
+    public ProxyDto getConfig() {
         return config;
     }
 
     // 서버 종료 메서드
-    public static void shutdown() {
+    public void shutdown() {
         isRunning = false;
 
         try {

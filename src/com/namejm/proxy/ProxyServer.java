@@ -71,45 +71,29 @@ public class ProxyServer {
 
                 // 설정 유효성 검사
                 if (!isValidConfig(proxyConfig)) {
-                     logger.warn("Skipping invalid proxy configuration: {}", proxyConfig.getName());
-                     continue;
+                    logger.warn("Skipping invalid proxy configuration: {}", proxyConfig.getName());
+                    continue;
                 }
 
-                logger.info("Creating startup thread for proxy: {}", proxyConfig.getName());
+                logger.info("Creating startup thread for proxy:  {}", proxyConfig.getName());
 
                 // ProxyMain 인스턴스 생성 및 시작
-//                Thread proxyThread = new Thread(() -> {
-//                    try {
-//                        logger.info("Thread started for proxy: {}. Creating ProxyMain instance...", proxyConfig.getName());
-//                        ProxyMain proxyMain = new ProxyMain(proxyConfig, inetAddressLocator);
-//                        proxyInstances.add(proxyMain);
-//                        logger.info("Starting ProxyMain for proxy: {}", proxyConfig.getName());
-//                        proxyMain.start();
-//                        logger.info("ProxyMain started successfully for proxy: {}", proxyConfig.getName());
-//                    } catch (IOException e) {
-//                        logger.error("!!! Failed to start proxy '{}': {}", proxyConfig.getName(), e.getMessage(), e);
-//                    } catch (Exception e) {
-//                        logger.error("!!! Unexpected error during proxy startup '{}': {}", proxyConfig.getName(), e.getMessage(), e);
-//                    }
-//                });
-//                proxyThread.setName("ProxyStarter-" + proxyConfig.getName());
-//                proxyThread.start();
-
-
-
-                try {
-                    logger.info("Starting ProxyMain synchronously for proxy: {}", proxyConfig.getName());
-                    ProxyMain proxyMain = new ProxyMain(proxyConfig, inetAddressLocator);
-                    synchronized(proxyInstances) { // Shutdown Hook 에서 사용하므로 동기화 유지
-                         proxyInstances.add(proxyMain);
+                Thread proxyThread = new Thread(() -> {
+                    try {
+                        logger.info("Thread started for proxy: {}. Creating ProxyMain instance...", proxyConfig.getName());
+                        ProxyMain proxyMain = new ProxyMain(proxyConfig, inetAddressLocator);
+                        proxyInstances.add(proxyMain);
+                        logger.info("Starting ProxyMain for proxy: {}", proxyConfig.getName());
+                        proxyMain.start();
+                        logger.info("ProxyMain started successfully for proxy: {}", proxyConfig.getName());
+                    } catch (IOException e) {
+                        logger.error("!!! Failed to start proxy '{}': {}", proxyConfig.getName(), e.getMessage(), e);
+                    } catch (Exception e) {
+                        logger.error("!!! Unexpected error during proxy startup '{}': {}", proxyConfig.getName(), e.getMessage(), e);
                     }
-                    proxyMain.start();
-                    logger.info("ProxyMain started successfully for proxy: {}", proxyConfig.getName());
-                } catch (IOException e) {
-                    logger.error("!!! Failed to start proxy '{}' synchronously: {}", proxyConfig.getName(), e.getMessage(), e);
-                } catch (Exception e) {
-                    logger.error("!!! Unexpected error during synchronous proxy startup '{}': {}", proxyConfig.getName(), e.getMessage(), e);
-                }
+                });
+                proxyThread.setName("ProxyStarter-" + proxyConfig.getName());
+                proxyThread.start();
             }
 
             // --- Graceful Shutdown 설정 ---
