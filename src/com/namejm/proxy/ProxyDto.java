@@ -12,7 +12,7 @@ import java.util.Set;
 public class ProxyDto {
     private static final Logger logger = LoggerFactory.getLogger(ProxyDto.class);
     private static final Set<String> VALID_TYPES = new HashSet<>(Arrays.asList("in"));
-    private static final Set<String> RESERVED_COUNTRIES = new HashSet<>(Arrays.asList("any", "localhost", "private")); // 예약어 (소문자)
+    private static final Set<String> RESERVED_COUNTRIES = new HashSet<>(Arrays.asList("any", "localhost", "private"));
 
     private String type;
     private String name;
