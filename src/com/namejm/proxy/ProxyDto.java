@@ -87,7 +87,7 @@ public class ProxyDto {
             logger.warn("allowedCountries is empty for proxy '{}'. No connections will be allowed unless 'any' is added.", name);
         } else {
             for (String country : allowedCountries) {
-                if("PRIVATE".equals(country) || "LOCALHOST".equals(country) || "ANY".equals(country)) {
+                if("Private".equalsIgnoreCase(country) || "localhost".equalsIgnoreCase(country) || "Any".equalsIgnoreCase(country)) {
                     valid = true;
                     break;
                 }
