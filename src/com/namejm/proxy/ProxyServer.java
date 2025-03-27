@@ -40,18 +40,16 @@ public class ProxyServer {
             }
 
             for(int i = 0; i < config.size(); i++){
-                new Thread(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            new ProxyMain(config.get(count++)).start();
-                        } catch (IOException e) {
-                            logger.error(e.getMessage());
-                            StringWriter sw = new StringWriter();
-                            e.printStackTrace(new PrintWriter(sw));
-                            String exceptionAsString = sw.toString();
-                            logger.error(exceptionAsString);
-                        }
+                final int index = i;
+                new Thread(() -> {
+                    try {
+                        new ProxyMain(config.get(index)).start();
+                    } catch (IOException e) {
+                        logger.error(e.getMessage());
+                        StringWriter sw = new StringWriter();
+                        e.printStackTrace(new PrintWriter(sw));
+                        String exceptionAsString = sw.toString();
+                        logger.error(exceptionAsString);
                     }
                 }).start();
             }

@@ -10,9 +10,10 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="c7718964-0505-42c5-af96-4936118c68be" name="디폴트 변경 목록" comment="- 로직개선">
-      <change beforePath="$PROJECT_DIR$/.idea/artifacts/JmProxyServer_jar.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/artifacts/JmProxyServer_jar.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/resources/logback.xml" beforeDir="false" afterPath="$PROJECT_DIR$/resources/logback.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyMain.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyMain.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyServer.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/com/namejm/proxy/ProxyServer.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -140,7 +141,8 @@
       <workItem from="1627482822961" duration="780000" />
       <workItem from="1742961584432" duration="342000" />
       <workItem from="1742962181416" duration="27000" />
-      <workItem from="1742962288666" duration="1379000" />
+      <workItem from="1742962288666" duration="1482000" />
+      <workItem from="1743033549333" duration="475000" />
     </task>
     <task id="LOCAL-00001" summary="- 멀티 쓰래드로 프로그램 작동하게끔 구현&#10;- Config yml추가">
       <created>1627482721392</created>
@@ -181,7 +183,15 @@
       <option name="project" value="LOCAL" />
       <updated>1742962790757</updated>
     </task>
-    <option name="localTasksCounter" value="6" />
+    <task id="LOCAL-00006" summary="- 로직개선">
+      <option name="closed" value="true" />
+      <created>1742970701561</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1742970701561</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

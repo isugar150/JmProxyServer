@@ -127,12 +127,22 @@ public class ProxyMain {
             Locale locale = InetAddressLocator.getLocale(remoteAddr);
             String country = locale.getCountry();
 
-            logger.info("Connection {} - IP: {}, Port: {}, Country: {}",
-                allowed ? "ALLOWED" : "BLOCKED",
-                remoteAddr,
-                remotePort,
-                country
-            );
+            if("UNKNOWN".equals(country)) {
+                logger.info("{} - Connection {} - IP: {}, Port: {}",
+                    config.getName(),
+                    allowed ? "ALLOWED" : "BLOCKED",
+                    remoteAddr,
+                    remotePort
+                );
+            } else {
+                logger.info("{} - Connection {} - IP: {}, Port: {}, Country: {}",
+                    config.getName(),
+                    allowed ? "ALLOWED" : "BLOCKED",
+                    remoteAddr,
+                    remotePort,
+                    country
+                );
+            }
         } catch (Exception e) {
             logger.warn("Connection logging error", e);
         }
@@ -201,7 +211,6 @@ public class ProxyMain {
             return ipAddress.startsWith("192.168.") ||
                    ipAddress.startsWith("10.") ||
                    ipAddress.startsWith("172.16.") ||
-                   ipAddress.startsWith("127.0.0.1") ||
                    isInSubnet(ipAddress, "192.168.0.0/24");
         } catch (Exception e) {
             return false;
