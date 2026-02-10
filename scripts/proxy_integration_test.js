@@ -19,6 +19,8 @@ const SHORT_CLIENTS = Number(process.env.SHORT_CLIENTS || 12);
 const LONG_CLIENTS = Number(process.env.LONG_CLIENTS || 12);
 const SHORT_MIN_MS = Number(process.env.SHORT_MIN_MS || 1000);
 const SHORT_MAX_MS = Number(process.env.SHORT_MAX_MS || 60000);
+const SHORT_GAP_MIN_MS = Number(process.env.SHORT_GAP_MIN_MS || 30);
+const SHORT_GAP_MAX_MS = Number(process.env.SHORT_GAP_MAX_MS || 160);
 const LONG_MIN_MS = Number(process.env.LONG_MIN_MS || 1000);
 const LONG_MAX_MS = Number(process.env.LONG_MAX_MS || 60000);
 const LONG_PING_INTERVAL_MS = Number(process.env.LONG_PING_INTERVAL_MS || 1000);
@@ -29,10 +31,10 @@ const HIGH_CONCURRENCY = Number(process.env.HIGH_CONCURRENCY || 300);
 
 const CONNECT_TIMEOUT_MS = Number(process.env.CONNECT_TIMEOUT_MS || 3000);
 const IO_TIMEOUT_MS = Number(process.env.IO_TIMEOUT_MS || 5000);
-const CONNECT_RETRY_COUNT = Number(process.env.CONNECT_RETRY_COUNT || 8);
-const CONNECT_RETRY_DELAY_MS = Number(process.env.CONNECT_RETRY_DELAY_MS || 10);
-const SHORT_REQUEST_RETRY_COUNT = Number(process.env.SHORT_REQUEST_RETRY_COUNT || 3);
-const SHORT_REQUEST_RETRY_DELAY_MS = Number(process.env.SHORT_REQUEST_RETRY_DELAY_MS || 15);
+const CONNECT_RETRY_COUNT = Number(process.env.CONNECT_RETRY_COUNT || 30);
+const CONNECT_RETRY_DELAY_MS = Number(process.env.CONNECT_RETRY_DELAY_MS || 50);
+const SHORT_REQUEST_RETRY_COUNT = Number(process.env.SHORT_REQUEST_RETRY_COUNT || 12);
+const SHORT_REQUEST_RETRY_DELAY_MS = Number(process.env.SHORT_REQUEST_RETRY_DELAY_MS || 40);
 const SHORT_START_JITTER_MS = Number(process.env.SHORT_START_JITTER_MS || 300);
 const CASE_COOLDOWN_MS = Number(process.env.CASE_COOLDOWN_MS || 10000);
 
@@ -51,7 +53,9 @@ function randomInt(min, max) {
 }
 
 function isTransientConnectError(err) {
-  if (!err || !err.code) return false;
+  if (!err) return false;
+  if (err.message && err.message.includes("connect timeout")) return true;
+  if (!err.code) return false;
   return (
     err.code === "EADDRINUSE" ||
     err.code === "EADDRNOTAVAIL" ||
@@ -263,7 +267,8 @@ async function oneShotRequestWithRetry(payload) {
       if (!isTransientRequestError(err) || i === attempts - 1) {
         throw err;
       }
-      const delay = Math.max(0, SHORT_REQUEST_RETRY_DELAY_MS) + randomInt(0, 20);
+      const linearBackoff = i * Math.max(0, SHORT_REQUEST_RETRY_DELAY_MS);
+      const delay = Math.max(0, SHORT_REQUEST_RETRY_DELAY_MS) + linearBackoff + randomInt(0, 30);
       await sleep(delay);
     }
   }
@@ -349,7 +354,7 @@ async function runShortLivedRandomCase() {
             const key = `${code}:${msg}`;
             failReasons.set(key, (failReasons.get(key) || 0) + 1);
           }
-          await sleep(randomInt(10, 80));
+          await sleep(randomInt(SHORT_GAP_MIN_MS, SHORT_GAP_MAX_MS));
         }
         return { durationMs, ok, fail };
       })()
