@@ -37,6 +37,7 @@ public class ProxyDto {
     private int healthFailThreshold;
     private int healthSuccessThreshold;
     private String lbStrategy;
+    private int halfCloseLingerSeconds;
 
     public static class LbTarget {
         private String name;
@@ -123,6 +124,8 @@ public class ProxyDto {
     public void setHealthSuccessThreshold(int healthSuccessThreshold) { this.healthSuccessThreshold = healthSuccessThreshold; }
     public String getLbStrategy() { return lbStrategy; }
     public void setLbStrategy(String lbStrategy) { this.lbStrategy = lbStrategy; }
+    public int getHalfCloseLingerSeconds() { return halfCloseLingerSeconds; }
+    public void setHalfCloseLingerSeconds(int halfCloseLingerSeconds) { this.halfCloseLingerSeconds = halfCloseLingerSeconds; }
 
     public boolean isInbound() {
         return "in".equalsIgnoreCase(type);
@@ -202,6 +205,10 @@ public class ProxyDto {
         return lbStrategy.trim().toLowerCase();
     }
 
+    public int getHalfCloseLingerSecondsOrDefault() {
+        return halfCloseLingerSeconds > 0 ? halfCloseLingerSeconds : 120;
+    }
+
     @Override
     public String toString() {
         return "ProxyDto{" +
@@ -226,6 +233,7 @@ public class ProxyDto {
                ", healthFailThreshold=" + healthFailThreshold +
                ", healthSuccessThreshold=" + healthSuccessThreshold +
                ", lbStrategy='" + lbStrategy + '\'' +
+               ", halfCloseLingerSeconds=" + halfCloseLingerSeconds +
                ", lb=" + lb +
                '}';
     }
@@ -302,6 +310,10 @@ public class ProxyDto {
         }
         if (healthSuccessThreshold < 0) {
             logger.error("Invalid healthSuccessThreshold '{}' for proxy '{}'. Must be 0 or greater.", healthSuccessThreshold, name);
+            valid = false;
+        }
+        if (halfCloseLingerSeconds < 0) {
+            logger.error("Invalid halfCloseLingerSeconds '{}' for proxy '{}'. Must be 0 or greater.", halfCloseLingerSeconds, name);
             valid = false;
         }
         String normalizedLbStrategy = getLbStrategyOrDefault();

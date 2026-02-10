@@ -2,17 +2,22 @@ package com.namejm.proxy;
 
 import java.net.Inet6Address;
 import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.net.Socket;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Map;
 
 public class ConnectionPolicy {
     private static final int COUNTRY_CACHE_MAX_SIZE = 10_000;
+    private static final int COUNTRY_CACHE_SHARDS = 16;
+    private static final int COUNTRY_CACHE_SHARD_MAX_SIZE = Math.max(1, COUNTRY_CACHE_MAX_SIZE / COUNTRY_CACHE_SHARDS);
 
     private final ProxyDto config;
     private final InetAddressLocator inetAddressLocator;
-    private final ConcurrentHashMap<String, String> countryCodeCache = new ConcurrentHashMap<>();
+    private final List<Map<String, String>> countryCodeCaches = new ArrayList<>(COUNTRY_CACHE_SHARDS);
+    private final Object[] countryCodeCacheLocks = new Object[COUNTRY_CACHE_SHARDS];
 
     public static class PolicyDecision {
         private final boolean allowed;
@@ -47,6 +52,15 @@ public class ConnectionPolicy {
     public ConnectionPolicy(ProxyDto config, InetAddressLocator inetAddressLocator) {
         this.config = config;
         this.inetAddressLocator = inetAddressLocator;
+        for (int i = 0; i < COUNTRY_CACHE_SHARDS; i++) {
+            countryCodeCacheLocks[i] = new Object();
+            countryCodeCaches.add(new LinkedHashMap<String, String>(256, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+                    return size() > COUNTRY_CACHE_SHARD_MAX_SIZE;
+                }
+            });
+        }
     }
 
     public boolean isAllowed(Socket clientSocket) {
@@ -76,7 +90,7 @@ public class ConnectionPolicy {
                 break;
             }
         }
-        String country = needsCountryLookup ? resolveCountryCode(remoteAddr) : "UNKNOWN";
+        String country = needsCountryLookup ? resolveCountryCode(remoteInet, remoteAddr) : "UNKNOWN";
 
         for (String allowedCondition : allowedConditions) {
             if (allowedCondition == null) {
@@ -110,26 +124,40 @@ public class ConnectionPolicy {
             return "UNKNOWN";
         }
 
-        String cached = countryCodeCache.get(ipAddress);
-        if (cached != null) {
-            return cached;
+        try {
+            InetAddress inetAddress = InetAddress.getByName(ipAddress);
+            return resolveCountryCode(inetAddress, ipAddress);
+        } catch (UnknownHostException e) {
+            return "UNKNOWN";
+        }
+    }
+
+    private String resolveCountryCode(InetAddress inetAddress, String cacheKey) {
+        if (inetAddress == null || cacheKey == null || cacheKey.isEmpty() || "UNKNOWN".equals(cacheKey)) {
+            return "UNKNOWN";
+        }
+
+        int shard = cacheShard(cacheKey);
+        synchronized (countryCodeCacheLocks[shard]) {
+            String cached = countryCodeCaches.get(shard).get(cacheKey);
+            if (cached != null) {
+                return cached;
+            }
         }
 
         try {
-            Locale locale = inetAddressLocator.getLocale(ipAddress);
-            String country = locale.getCountry();
-            if (country == null || country.isEmpty()) {
-                country = "UNKNOWN";
+            String country = inetAddressLocator.getCountryCode(inetAddress);
+            synchronized (countryCodeCacheLocks[shard]) {
+                countryCodeCaches.get(shard).put(cacheKey, country);
             }
-
-            if (countryCodeCache.size() >= COUNTRY_CACHE_MAX_SIZE) {
-                countryCodeCache.clear();
-            }
-            countryCodeCache.put(ipAddress, country);
             return country;
         } catch (Exception e) {
             return "UNKNOWN";
         }
+    }
+
+    private int cacheShard(String key) {
+        return (key.hashCode() & Integer.MAX_VALUE) % COUNTRY_CACHE_SHARDS;
     }
 
     private boolean isPrivateIP(InetAddress inetAddress, String ipAddress) {

@@ -23,6 +23,7 @@ proxy:
 #   healthFailThreshold: 3 # 연속 실패 N회 시 UNHEALTHY 전환, 미설정 시 3
 #   healthSuccessThreshold: 2 # 연속 성공 N회 시 HEALTHY 전환, 미설정 시 2
 #   transferTimeoutSeconds: 0 # 데이터 전송 최대시간(초), 0이면 무제한
+#   halfCloseLingerSeconds: 120 # transferTimeoutSeconds=0일 때 half-close 유지 최대시간(초), 미설정 시 120
 #   clientSoTimeoutMillis: 0 # 클라이언트 소켓 타임아웃(ms), 0이면 무제한
 #   forwardConnectTimeoutMillis: 5000 # 타깃 서버 연결 타임아웃(ms), 미설정 시 5000
 #   forwardSoTimeoutMillis: 0 # 타깃 서버 소켓 타임아웃(ms), 0이면 무제한
@@ -45,6 +46,7 @@ proxy:
     healthFailThreshold: 3
     healthSuccessThreshold: 2
     transferTimeoutSeconds: 0
+    halfCloseLingerSeconds: 120
     allowedCountries: [private, localhost]
   - type: in
     name: sample-2
@@ -66,6 +68,7 @@ proxy:
     healthFailThreshold: 3
     healthSuccessThreshold: 2
     transferTimeoutSeconds: 0
+    halfCloseLingerSeconds: 120
     lb:
       - name: lb1
         forwardHost: localhost

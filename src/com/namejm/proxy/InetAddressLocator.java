@@ -10,12 +10,22 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class InetAddressLocator implements AutoCloseable {
     final private static Logger logger = LoggerFactory.getLogger(InetAddressLocator.class);
-    private static volatile DatabaseReader reader;
+    private volatile DatabaseReader reader;
+    private final AtomicBoolean closed = new AtomicBoolean(false);
 
     public InetAddressLocator(String databasePath) throws IOException {
+        reload(databasePath);
+    }
+
+    public synchronized void reload(String databasePath) throws IOException {
+        if (closed.get()) {
+            throw new IllegalStateException("InetAddressLocator is already closed.");
+        }
+
         File database = new File(databasePath);
         if (!database.exists()) {
             throw new FileNotFoundException("GeoIP database file not found: " + databasePath);
@@ -25,34 +35,49 @@ public class InetAddressLocator implements AutoCloseable {
         logger.info("GeoIP database loaded successfully from: {}", databasePath);
     }
 
-    public Locale getLocale(String ipAddress) {
+    public String getCountryCode(InetAddress inetAddress) {
+        if (inetAddress == null) {
+            return "UNKNOWN";
+        }
+
         try {
             DatabaseReader currentReader = reader;
             if (currentReader == null) {
-                return new Locale("", "UNKNOWN");
+                return "UNKNOWN";
             }
-            InetAddress inetAddress = InetAddress.getByName(ipAddress);
             CountryResponse response = currentReader.country(inetAddress);
             String countryCode = response.getCountry().getIsoCode();
-
             if (countryCode == null || countryCode.isEmpty()) {
+                return "UNKNOWN";
+            }
+            return countryCode;
+        } catch (Exception e) {
+            return "UNKNOWN";
+        }
+    }
+
+    public Locale getLocale(String ipAddress) {
+        try {
+            InetAddress inetAddress = InetAddress.getByName(ipAddress);
+            String countryCode = getCountryCode(inetAddress);
+            if ("UNKNOWN".equals(countryCode)) {
                 return new Locale("", "UNKNOWN");
             }
 
-            // 국가 코드로 Locale 생성
             return new Locale("", countryCode);
         } catch (Exception e) {
-            // 예외 발생 시 UNKNOWN 로케일 반환
             return new Locale("", "UNKNOWN");
         }
     }
 
     @Override
     public void close() {
-        replaceReader(null);
+        if (closed.compareAndSet(false, true)) {
+            replaceReader(null);
+        }
     }
 
-    private static synchronized void replaceReader(DatabaseReader newReader) {
+    private synchronized void replaceReader(DatabaseReader newReader) {
         DatabaseReader oldReader = reader;
         reader = newReader;
         if (oldReader != null) {

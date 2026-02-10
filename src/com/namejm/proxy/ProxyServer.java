@@ -4,6 +4,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
+import java.nio.file.FileSystems;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardWatchEventKinds;
+import java.nio.file.WatchEvent;
+import java.nio.file.WatchKey;
+import java.nio.file.WatchService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ProxyServer {
     private static final Logger logger = LoggerFactory.getLogger(ProxyServer.class);
@@ -20,6 +32,21 @@ public class ProxyServer {
     private static volatile long configReloadDebounceMillis = 500L;
     private static volatile boolean hotReloadEnabled = true;
     private static volatile String activeGeoIpDbPath = DEFAULT_GEO_IP_DB_PATH;
+    private static final AtomicBoolean reloadInProgress = new AtomicBoolean(false);
+    private static final ExecutorService reloadExecutor = new ThreadPoolExecutor(
+        1,
+        1,
+        0L,
+        TimeUnit.MILLISECONDS,
+        new LinkedBlockingQueue<>(1),
+        r -> {
+            Thread t = new Thread(r);
+            t.setName("ProxyConfigReloadWorker");
+            t.setDaemon(true);
+            return t;
+        },
+        new ThreadPoolExecutor.DiscardOldestPolicy()
+    );
 
     public static void main(String[] args) {
         System.out.println("       _           _____                      _____                          \n" +
@@ -44,16 +71,31 @@ public class ProxyServer {
             ConfigLoadResult initialLoad = configLoader.load(configPath);
             if (initialLoad == null) {
                 logger.error("Failed to load initial configuration from {}", configPath);
+                lifecycleManager.shutdownExecutor();
+                System.exit(1);
+                return;
+            }
+            if (initialLoad.validConfigs.isEmpty()) {
+                logger.error("No valid proxy entries found in initial configuration. Startup is aborted.");
+                lifecycleManager.shutdownExecutor();
                 System.exit(1);
                 return;
             }
 
             if (!initializeGeoIpLocator(initialLoad.globalConfig)) {
+                lifecycleManager.shutdownExecutor();
                 System.exit(1);
                 return;
             }
             applyRuntimeOptions(initialLoad.globalConfig);
             lifecycleManager.applyConfig(initialLoad.validConfigs, inetAddressLocator, "initial load");
+            if (lifecycleManager.getActiveProxyCount() == 0) {
+                logger.error("No proxy instance could be started from the initial configuration. Startup is aborted.");
+                closeGeoIpLocator();
+                lifecycleManager.shutdownExecutor();
+                System.exit(1);
+                return;
+            }
             addShutdownHook();
             if (hotReloadEnabled) {
                 startConfigWatcher(configPath);
@@ -66,6 +108,7 @@ public class ProxyServer {
             e.printStackTrace(new PrintWriter(sw));
             String exceptionAsString = sw.toString();
             logger.error(exceptionAsString);
+            lifecycleManager.shutdownExecutor();
         }
     }
 
@@ -77,60 +120,126 @@ public class ProxyServer {
                 configWatcherThread.interrupt();
             }
             logger.info("Shutdown hook triggered. Shutting down proxy servers...");
-            lifecycleManager.shutdownAll("shutdown hook");
-            closeGeoIpLocator();
+            try {
+                lifecycleManager.shutdownAll("shutdown hook");
+            } catch (Exception e) {
+                logger.error("Error during lifecycle shutdown", e);
+            } finally {
+                closeGeoIpLocator();
+                reloadExecutor.shutdownNow();
+                lifecycleManager.shutdownExecutor();
+            }
             logger.info("All proxy servers shut down.");
         }, "ProxyShutdownHook"));
     }
 
     private static void startConfigWatcher(String configPath) {
-        File configFile = new File(configPath);
-        long initialLastModified = configFile.exists() ? configFile.lastModified() : 0L;
-
-        configWatcherThread = new Thread(() -> watchConfigChanges(configPath, configFile, initialLastModified), "ProxyConfigWatcher");
+        Path configFilePath = Paths.get(configPath).toAbsolutePath().normalize();
+        configWatcherThread = new Thread(() -> watchConfigChanges(configFilePath), "ProxyConfigWatcher");
         configWatcherThread.setDaemon(false);
         configWatcherThread.start();
-        logger.info("Config watcher started for: {}", configFile.getAbsolutePath());
+        logger.info("Config watcher started for: {}", configFilePath);
     }
 
-    private static void watchConfigChanges(String configPath, File configFile, long lastModified) {
-        long currentLastModified = lastModified;
-        while (running && !Thread.currentThread().isInterrupted()) {
-            try {
+    private static void watchConfigChanges(Path configFilePath) {
+        Path directory = configFilePath.getParent();
+        if (directory == null) {
+            logger.error("Config watcher cannot start: parent directory not found for {}", configFilePath);
+            return;
+        }
+        String fileName = configFilePath.getFileName().toString();
+
+        try (WatchService watchService = FileSystems.getDefault().newWatchService()) {
+            directory.register(
+                watchService,
+                StandardWatchEventKinds.ENTRY_MODIFY,
+                StandardWatchEventKinds.ENTRY_CREATE,
+                StandardWatchEventKinds.ENTRY_DELETE
+            );
+
+            while (running && !Thread.currentThread().isInterrupted()) {
                 if (!hotReloadEnabled) {
                     logger.info("Hot reload disabled. Config watcher is stopping.");
                     break;
                 }
 
-                long fileLastModified = configFile.exists() ? configFile.lastModified() : 0L;
-                if (fileLastModified > 0L && fileLastModified != currentLastModified) {
-                    logger.info("Configuration change detected. Reloading: {}", configFile.getAbsolutePath());
-                    Thread.sleep(configReloadDebounceMillis);
+                WatchKey key = watchService.poll(configWatchIntervalMillis, TimeUnit.MILLISECONDS);
+                if (key == null) {
+                    continue;
+                }
 
-                    ConfigLoadResult reloaded = configLoader.load(configPath);
-                    if (reloaded == null) {
-                        logger.warn("Configuration reload failed. Keeping current runtime configuration.");
-                        currentLastModified = fileLastModified;
-                    } else if (reloaded.validConfigs.isEmpty() && !reloaded.parsedConfigs.isEmpty()) {
-                        logger.warn("Reloaded configuration has no valid proxy entries. Keeping current runtime configuration.");
-                        currentLastModified = fileLastModified;
-                    } else {
-                        refreshGeoIpLocatorIfNeeded(reloaded.globalConfig);
-                        applyRuntimeOptions(reloaded.globalConfig);
-                        lifecycleManager.applyConfig(reloaded.validConfigs, inetAddressLocator, "config reload");
-                        currentLastModified = fileLastModified;
-                        logger.info("Configuration reload applied successfully. Active proxies: {}", reloaded.validConfigs.size());
+                boolean configChanged = false;
+                for (WatchEvent<?> event : key.pollEvents()) {
+                    if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
+                        continue;
+                    }
+                    Object context = event.context();
+                    if (context instanceof Path) {
+                        Path changed = (Path) context;
+                        if (fileName.equals(changed.getFileName().toString())) {
+                            configChanged = true;
+                            break;
+                        }
                     }
                 }
 
-                Thread.sleep(configWatchIntervalMillis);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            } catch (Exception e) {
-                logger.error("Unexpected error in config watcher loop", e);
+                boolean valid = key.reset();
+                if (!valid) {
+                    logger.warn("Config watcher key became invalid. Stopping watcher.");
+                    break;
+                }
+
+                if (!configChanged) {
+                    continue;
+                }
+
+                logger.info("Configuration change detected. Reloading: {}", configFilePath);
+                Thread.sleep(configReloadDebounceMillis);
+                triggerAsyncReload(configFilePath);
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            logger.error("Unexpected error in config watcher loop", e);
         }
+
         logger.info("Config watcher stopped.");
+    }
+
+    private static void triggerAsyncReload(Path configFilePath) {
+        try {
+            reloadExecutor.submit(() -> reloadConfiguration(configFilePath));
+        } catch (Exception e) {
+            logger.warn("Reload task submission failed. Skipping this change event.", e);
+        }
+    }
+
+    private static void reloadConfiguration(Path configFilePath) {
+        if (!reloadInProgress.compareAndSet(false, true)) {
+            logger.debug("Reload already in progress. Coalescing duplicate config change event.");
+            return;
+        }
+
+        try {
+            ConfigLoadResult reloaded = configLoader.load(configFilePath.toString());
+            if (reloaded == null) {
+                logger.warn("Configuration reload failed. Keeping current runtime configuration and retrying on next watch cycle.");
+                return;
+            }
+            if (reloaded.validConfigs.isEmpty()) {
+                logger.warn("Reloaded configuration has no valid proxy entries. Keeping current runtime configuration and retrying on next watch cycle.");
+                return;
+            }
+
+            refreshGeoIpLocatorIfNeeded(reloaded.globalConfig);
+            applyRuntimeOptions(reloaded.globalConfig);
+            lifecycleManager.applyConfig(reloaded.validConfigs, inetAddressLocator, "config reload");
+            logger.info("Configuration reload applied successfully. Active proxies: {}", reloaded.validConfigs.size());
+        } catch (Exception e) {
+            logger.error("Unexpected error during async configuration reload", e);
+        } finally {
+            reloadInProgress.set(false);
+        }
     }
 
     private static boolean initializeGeoIpLocator(GlobalConfig globalConfig) {
@@ -152,8 +261,11 @@ public class ProxyServer {
         }
 
         try {
-            InetAddressLocator newLocator = new InetAddressLocator(configuredPath);
-            inetAddressLocator = newLocator;
+            if (inetAddressLocator == null) {
+                inetAddressLocator = new InetAddressLocator(configuredPath);
+            } else {
+                inetAddressLocator.reload(configuredPath);
+            }
             activeGeoIpDbPath = configuredPath;
             logger.info("GeoIP database path updated: {}", configuredPath);
         } catch (IOException e) {

@@ -2,12 +2,12 @@ package com.namejm.proxy;
 
 import org.slf4j.Logger;
 import org.yaml.snakeyaml.Yaml;
-import org.yaml.snakeyaml.constructor.Constructor;
 
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -43,8 +43,7 @@ class ProxyConfigLoader {
         }
 
         if (hasInvalidProxy) {
-            logger.error("Configuration rejected: partial apply is disabled and invalid proxy entries were found.");
-            return null;
+            logger.warn("Invalid proxy entries detected. Applying only valid entries (partial apply enabled).");
         }
 
         return new ConfigLoadResult(parseResult.parsedConfigs, validConfigs, globalConfig);
@@ -81,7 +80,6 @@ class ProxyConfigLoader {
         }
 
         List<?> rawProxyList = (List<?>) proxyObj;
-        Yaml mapYaml = new Yaml();
 
         for (int i = 0; i < rawProxyList.size(); i++) {
             Object item = rawProxyList.get(i);
@@ -91,8 +89,9 @@ class ProxyConfigLoader {
                 continue;
             }
             try {
-                Yaml dtoYaml = new Yaml(new Constructor(ProxyDto.class));
-                ProxyDto proxyDto = dtoYaml.load(mapYaml.dump(item));
+                @SuppressWarnings("unchecked")
+                Map<String, Object> itemMap = (Map<String, Object>) item;
+                ProxyDto proxyDto = mapToProxyDto(itemMap);
 
                 if (proxyDto != null) {
                     applyGlobalConfig(proxyDto, globalConfig);
@@ -107,6 +106,111 @@ class ProxyConfigLoader {
             }
         }
         return new ParseResult(proxyList, hasParseError);
+    }
+
+    private ProxyDto mapToProxyDto(Map<String, Object> itemMap) {
+        ProxyDto dto = new ProxyDto();
+        dto.setType(parseString(itemMap.get("type")));
+        dto.setName(parseString(itemMap.get("name")));
+        String proxyName = dto.getName() != null ? dto.getName() : "unknown";
+        boolean[] hasMappingError = new boolean[] {false};
+
+        dto.setBindPort(parseInt(itemMap.get("bindPort"), "proxy[" + proxyName + "].bindPort", hasMappingError));
+        dto.setForwardHost(parseString(itemMap.get("forwardHost")));
+        dto.setForwardPort(parseInt(itemMap.get("forwardPort"), "proxy[" + proxyName + "].forwardPort", hasMappingError));
+        dto.setAllowedCountries(parseStringList(itemMap.get("allowedCountries")));
+        dto.setLb(parseLbTargets(itemMap.get("lb"), proxyName, hasMappingError));
+        dto.setLbHealthCheckIntervalSeconds(parseInt(itemMap.get("lbHealthCheckIntervalSeconds"), "proxy[" + proxyName + "].lbHealthCheckIntervalSeconds", hasMappingError));
+        dto.setTransferTimeoutSeconds(parseInt(itemMap.get("transferTimeoutSeconds"), "proxy[" + proxyName + "].transferTimeoutSeconds", hasMappingError));
+        dto.setClientSoTimeoutMillis(parseInt(itemMap.get("clientSoTimeoutMillis"), "proxy[" + proxyName + "].clientSoTimeoutMillis", hasMappingError));
+        dto.setForwardConnectTimeoutMillis(parseInt(itemMap.get("forwardConnectTimeoutMillis"), "proxy[" + proxyName + "].forwardConnectTimeoutMillis", hasMappingError));
+        dto.setForwardSoTimeoutMillis(parseInt(itemMap.get("forwardSoTimeoutMillis"), "proxy[" + proxyName + "].forwardSoTimeoutMillis", hasMappingError));
+        dto.setHealthCheckConnectTimeoutMillis(parseInt(itemMap.get("healthCheckConnectTimeoutMillis"), "proxy[" + proxyName + "].healthCheckConnectTimeoutMillis", hasMappingError));
+        dto.setHealthCheckInitialDelaySeconds(parseInt(itemMap.get("healthCheckInitialDelaySeconds"), "proxy[" + proxyName + "].healthCheckInitialDelaySeconds", hasMappingError));
+        dto.setExecutorCorePoolSize(parseInt(itemMap.get("executorCorePoolSize"), "proxy[" + proxyName + "].executorCorePoolSize", hasMappingError));
+        dto.setExecutorMaxPoolSize(parseInt(itemMap.get("executorMaxPoolSize"), "proxy[" + proxyName + "].executorMaxPoolSize", hasMappingError));
+        dto.setExecutorKeepAliveSeconds(parseInt(itemMap.get("executorKeepAliveSeconds"), "proxy[" + proxyName + "].executorKeepAliveSeconds", hasMappingError));
+        dto.setExecutorQueueCapacity(parseInt(itemMap.get("executorQueueCapacity"), "proxy[" + proxyName + "].executorQueueCapacity", hasMappingError));
+        dto.setShutdownAwaitSeconds(parseInt(itemMap.get("shutdownAwaitSeconds"), "proxy[" + proxyName + "].shutdownAwaitSeconds", hasMappingError));
+        dto.setHealthFailThreshold(parseInt(itemMap.get("healthFailThreshold"), "proxy[" + proxyName + "].healthFailThreshold", hasMappingError));
+        dto.setHealthSuccessThreshold(parseInt(itemMap.get("healthSuccessThreshold"), "proxy[" + proxyName + "].healthSuccessThreshold", hasMappingError));
+        dto.setLbStrategy(parseString(itemMap.get("lbStrategy")));
+        dto.setHalfCloseLingerSeconds(parseInt(itemMap.get("halfCloseLingerSeconds"), "proxy[" + proxyName + "].halfCloseLingerSeconds", hasMappingError));
+        if (hasMappingError[0]) {
+            return null;
+        }
+        return dto;
+    }
+
+    private String parseString(Object value) {
+        if (value == null) {
+            return null;
+        }
+        return String.valueOf(value).trim();
+    }
+
+    private int parseInt(Object value, String fieldName, boolean[] hasMappingError) {
+        if (value == null) {
+            return 0;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        if (value instanceof String) {
+            try {
+                return Integer.parseInt(((String) value).trim());
+            } catch (NumberFormatException e) {
+                logger.error("Invalid integer value '{}' for {}.", value, fieldName);
+                hasMappingError[0] = true;
+                return 0;
+            }
+        }
+        logger.error("Invalid integer type '{}' for {}.", value.getClass().getName(), fieldName);
+        hasMappingError[0] = true;
+        return 0;
+    }
+
+    private List<String> parseStringList(Object value) {
+        if (!(value instanceof List)) {
+            return Collections.emptyList();
+        }
+        List<?> raw = (List<?>) value;
+        List<String> out = new ArrayList<>(raw.size());
+        for (Object item : raw) {
+            if (item == null) {
+                continue;
+            }
+            out.add(String.valueOf(item));
+        }
+        return out;
+    }
+
+    private List<ProxyDto.LbTarget> parseLbTargets(Object value, String proxyName, boolean[] hasMappingError) {
+        if (!(value instanceof List)) {
+            if (value != null) {
+                logger.error("Invalid type '{}' for proxy[{}].lb. Expected list.", value.getClass().getName(), proxyName);
+                hasMappingError[0] = true;
+            }
+            return Collections.emptyList();
+        }
+        List<?> raw = (List<?>) value;
+        List<ProxyDto.LbTarget> targets = new ArrayList<>(raw.size());
+        for (Object item : raw) {
+            if (!(item instanceof Map)) {
+                logger.error("Invalid lb entry for proxy[{}]: expected map but got '{}'.", proxyName,
+                    item == null ? "null" : item.getClass().getName());
+                hasMappingError[0] = true;
+                continue;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> lbMap = (Map<String, Object>) item;
+            ProxyDto.LbTarget target = new ProxyDto.LbTarget();
+            target.setName(parseString(lbMap.get("name")));
+            target.setForwardHost(parseString(lbMap.get("forwardHost")));
+            target.setForwardPort(parseInt(lbMap.get("forwardPort"), "proxy[" + proxyName + "].lb.forwardPort", hasMappingError));
+            targets.add(target);
+        }
+        return targets;
     }
 
     private GlobalConfig parseGlobalConfig(Map<String, Object> rawConfig) {
