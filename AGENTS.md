@@ -52,6 +52,72 @@ java -jar JmProxyServer.jar .\config\application.yml
 - Recommended focus: `ProxyDto.isValid`, `ConnectionPolicy`, `TargetHealthTracker` threshold transitions, and failover target selection.
 - For now, validate changes by running the server with sample entries in `config/application.yml` and checking log output.
 
+### E2E / Load Test Playbook (Executed in this repo)
+- Prerequisites:
+  - Java 11+
+  - Node.js 18+
+  - Install script deps once:
+```powershell
+cd scripts
+npm install
+```
+
+- Compile before tests:
+```powershell
+javac -encoding UTF-8 -cp "lib/*" -d out src/com/namejm/proxy/*.java
+```
+
+- Integrated E2E (script starts backend + proxy):
+```powershell
+node scripts/proxy_e2e_test.js
+```
+  - Validates basic relay and `maxActiveRelays` enforcement.
+
+- Client E2E (when proxy is already running externally):
+```powershell
+node scripts/proxy_client_e2e.js
+```
+
+- Load test (normal echo backend):
+```powershell
+cd scripts
+$env:START_BACKEND='true'
+$env:PROXY_PORT='19310'
+$env:BACKEND_PORT='19320'
+$env:TOTAL_REQUESTS='2000'
+$env:CONCURRENCY='200'
+$env:CONNECT_TIMEOUT_MS='3000'
+$env:IO_TIMEOUT_MS='3000'
+$env:TEST_TIMEOUT_MS='120000'
+node proxy_load_test.js
+```
+
+- Load test (intentionally slow backend response):
+```powershell
+cd scripts
+$env:START_BACKEND='true'
+$env:PROXY_PORT='19310'
+$env:BACKEND_PORT='19320'
+$env:TOTAL_REQUESTS='600'
+$env:CONCURRENCY='100'
+$env:CONNECT_TIMEOUT_MS='3000'
+$env:IO_TIMEOUT_MS='5000'
+$env:TEST_TIMEOUT_MS='120000'
+$env:BACKEND_MODE='slow'
+$env:BACKEND_DELAY_MS='80'
+node proxy_load_test_slow.js
+```
+
+- Proxy for load tests (separate process):
+```powershell
+java -cp "out;lib/*" com.namejm.proxy.ProxyServer config/loadtest.application.yml
+```
+
+- Notes:
+  - Load scripts print `LOAD_TEST_RESULT` with success rate and latency percentiles.
+  - Current load script returns exit code `1` when any request fails (`fail > 0`), even when test finishes correctly.
+  - If port conflict occurs (`EADDRINUSE`), stop existing process on `19310` / `19320` first.
+
 ## Commit & Pull Request Guidelines
 - Recent history uses short, imperative messages (often Korean), e.g., `로직 개선`, `Update ProxyDto.java`.
 - Prefer concise subject lines under 72 chars; include scope when useful (example: `proxy: improve private IP filtering`).

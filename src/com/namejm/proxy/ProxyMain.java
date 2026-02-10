@@ -11,9 +11,11 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -26,11 +28,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.nio.channels.spi.SelectorProvider;
 
 import static ch.qos.logback.core.util.CloseUtil.closeQuietly;
 
 public class ProxyMain {
     private static final Logger logger = LoggerFactory.getLogger(ProxyMain.class);
+    private static final int RELAY_BUFFER_SIZE = 16 * 1024;
 
     private final ProxyDto config;
     private final ExecutorService executorService;
@@ -45,6 +49,9 @@ public class ProxyMain {
     private final ConcurrentHashMap<String, RelayContext> relayContexts = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, AtomicLong> warnLogGates = new ConcurrentHashMap<>();
     private final AtomicInteger activeRelayCount = new AtomicInteger(0);
+    private final ConcurrentHashMap<String, BlockingQueue<Socket>> warmUpstreamPools;
+    private final ScheduledExecutorService warmPoolScheduler;
+    private final int warmPoolTargetSizePerTarget;
 
     private ScheduledExecutorService healthCheckExecutor;
     private ExecutorService healthCheckProbeExecutor;
@@ -100,12 +107,13 @@ public class ProxyMain {
             connectRejectionHandler
         );
 
-        int transferCoreThreads = Math.max(8, maxPoolSize * 2);
-        int transferMaxThreads = Math.max(32, maxPoolSize * 4);
-        transferMaxThreads = Math.min(transferMaxThreads, 256);
+        int relayHardLimit = Math.max(64, config.getMaxActiveRelaysOrDefault());
+        int transferCoreThreads = Math.max(8, Math.min(relayHardLimit, maxPoolSize * 2));
+        int transferMaxThreads = Math.max(transferCoreThreads, Math.min(relayHardLimit * 2, maxPoolSize * 8));
+        transferMaxThreads = Math.min(transferMaxThreads, 2048);
         transferCoreThreads = Math.min(transferCoreThreads, transferMaxThreads);
-        int transferQueueCapacity = Math.max(256, config.getExecutorQueueCapacityOrDefault() * 2);
-        transferQueueCapacity = Math.min(transferQueueCapacity, 4096);
+        int transferQueueCapacity = Math.max(256, Math.min(relayHardLimit * 4, config.getExecutorQueueCapacityOrDefault() * 4));
+        transferQueueCapacity = Math.min(transferQueueCapacity, 16384);
         RejectedExecutionHandler transferRejectionHandler = new ThreadPoolExecutor.AbortPolicy();
         ThreadPoolExecutor transferPool = new ThreadPoolExecutor(
             transferCoreThreads,
@@ -149,6 +157,25 @@ public class ProxyMain {
             thread.setDaemon(true);
             return thread;
         });
+
+        int candidatePoolSize = Math.max(0, Math.min(32, maxPoolSize));
+        if (!forwardTargets.isEmpty() && candidatePoolSize > 0) {
+            this.warmPoolTargetSizePerTarget = candidatePoolSize;
+            this.warmUpstreamPools = new ConcurrentHashMap<>();
+            for (ForwardTarget target : forwardTargets) {
+                warmUpstreamPools.put(target.key(), new LinkedBlockingQueue<>(warmPoolTargetSizePerTarget));
+            }
+            this.warmPoolScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread thread = new Thread(r);
+                thread.setName("ProxyWarmPool-" + config.getName());
+                thread.setDaemon(true);
+                return thread;
+            });
+        } else {
+            this.warmPoolTargetSizePerTarget = 0;
+            this.warmUpstreamPools = null;
+            this.warmPoolScheduler = null;
+        }
     }
 
     public void start() throws IOException {
@@ -158,12 +185,19 @@ public class ProxyMain {
             serverSocket.bind(new InetSocketAddress(config.getBindPort()));
 
             logger.info("Proxy server started on port {}", config.getBindPort());
+            logger.info("{} - JDK Selector provider: {}", config.getName(), SelectorProvider.provider().getClass().getName());
+            if (transferExecutor instanceof ThreadPoolExecutor) {
+                ThreadPoolExecutor tpe = (ThreadPoolExecutor) transferExecutor;
+                logger.info("{} - Transfer pool configured: core={}, max={}, queueCapacity={}",
+                    config.getName(), tpe.getCorePoolSize(), tpe.getMaximumPoolSize(), tpe.getQueue().remainingCapacity() + tpe.getQueue().size());
+            }
 
             if (forwardTargets.size() > 1) {
                 startHealthCheckScheduler();
             } else {
                 logger.info("{} - Health check scheduler skipped (single forward target)", config.getName());
             }
+            startWarmPoolIfNeeded();
 
             Thread acceptThread = new Thread(this::acceptConnections);
             acceptThread.setName("ProxyAcceptThread-" + config.getBindPort());
@@ -256,6 +290,14 @@ public class ProxyMain {
 
         for (ForwardTarget target : candidates) {
             try {
+                Socket warm = borrowWarmUpstream(target);
+                if (warm != null) {
+                    healthTracker.markReachable(target);
+                    logger.debug("{} - Warm pooled target selected: {} ({}:{})",
+                        config.getName(), target.getName(), target.getHost(), target.getPort());
+                    return warm;
+                }
+
                 Socket upstreamSocket = connectToTarget(target, config.getForwardConnectTimeoutMillisOrDefault());
                 healthTracker.markReachable(target);
                 logger.debug("{} - Forward target selected: {} ({}:{})",
@@ -366,6 +408,71 @@ public class ProxyMain {
         return socket;
     }
 
+    private void startWarmPoolIfNeeded() {
+        if (warmPoolScheduler == null || warmPoolTargetSizePerTarget <= 0 || forwardTargets.isEmpty()) {
+            return;
+        }
+        warmPoolScheduler.scheduleWithFixedDelay(this::fillWarmUpstreamPool, 0, 200, TimeUnit.MILLISECONDS);
+        logger.info("{} - Warm upstream pool enabled. perTargetSize={}, targets={}",
+            config.getName(), warmPoolTargetSizePerTarget, forwardTargets.size());
+    }
+
+    private void fillWarmUpstreamPool() {
+        if (!isRunning || warmUpstreamPools == null || forwardTargets.isEmpty()) {
+            return;
+        }
+
+        for (ForwardTarget target : forwardTargets) {
+            BlockingQueue<Socket> queue = warmUpstreamPools.get(target.key());
+            if (queue == null) {
+                continue;
+            }
+            while (isRunning && queue.size() < warmPoolTargetSizePerTarget) {
+                try {
+                    Socket socket = connectToTarget(target, config.getForwardConnectTimeoutMillisOrDefault());
+                    healthTracker.markReachable(target);
+                    if (!queue.offer(socket)) {
+                        closeQuietly(socket);
+                        break;
+                    }
+                } catch (Exception e) {
+                    healthTracker.markUnreachable(target);
+                    if (shouldLogWarn("warm-fill-failed:" + target.key(), 3000L)) {
+                        logger.warn("{} - Warm pool fill failed for target {} ({}:{})",
+                            config.getName(), target.getName(), target.getHost(), target.getPort());
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    private Socket borrowWarmUpstream(ForwardTarget target) {
+        if (warmUpstreamPools == null || target == null) {
+            return null;
+        }
+        BlockingQueue<Socket> queue = warmUpstreamPools.get(target.key());
+        if (queue == null) {
+            return null;
+        }
+        while (true) {
+            Socket socket = queue.poll();
+            if (socket == null) {
+                return null;
+            }
+            if (socket.isClosed() || !socket.isConnected()) {
+                closeQuietly(socket);
+                continue;
+            }
+            try {
+                socket.setSoTimeout(config.getForwardSoTimeoutMillisOrDefault());
+                return socket;
+            } catch (Exception e) {
+                closeQuietly(socket);
+            }
+        }
+    }
+
     private void logConnection(ConnectionPolicy.PolicyDecision decision) {
         try {
             String remoteAddr = decision.getRemoteAddr();
@@ -456,7 +563,7 @@ public class ProxyMain {
             in = sourceSocket.getInputStream();
             out = destinationSocket.getOutputStream();
 
-            byte[] buffer = new byte[4096];
+            byte[] buffer = new byte[RELAY_BUFFER_SIZE];
             int bytesRead;
             while (!relayContext.isClosed() && (bytesRead = in.read(buffer)) != -1) {
                 out.write(buffer, 0, bytesRead);
@@ -569,6 +676,8 @@ public class ProxyMain {
         shutdownExecutorGracefully(transferExecutor, "transferExecutor");
         shutdownExecutorGracefully(transferFallbackExecutor, "transferFallbackExecutor");
         shutdownScheduledExecutorGracefully(transferTimeoutScheduler, "transferTimeoutScheduler");
+        shutdownScheduledExecutorGracefully(warmPoolScheduler, "warmPoolScheduler");
+        clearWarmUpstreamPool();
     }
 
     private void shutdownExecutorGracefully(ExecutorService executor, String name) {
@@ -608,6 +717,22 @@ public class ProxyMain {
         AtomicLong gate = warnLogGates.computeIfAbsent(key, ignored -> new AtomicLong(0L));
         long previous = gate.get();
         return now - previous >= intervalMillis && gate.compareAndSet(previous, now);
+    }
+
+    private void clearWarmUpstreamPool() {
+        if (warmUpstreamPools == null) {
+            return;
+        }
+        for (Map.Entry<String, BlockingQueue<Socket>> entry : warmUpstreamPools.entrySet()) {
+            BlockingQueue<Socket> queue = entry.getValue();
+            if (queue == null) {
+                continue;
+            }
+            Socket socket;
+            while ((socket = queue.poll()) != null) {
+                closeQuietly(socket);
+            }
+        }
     }
 
     private boolean acquireRelaySlot() {

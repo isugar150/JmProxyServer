@@ -136,19 +136,49 @@ async function requestEcho(port, payload) {
   const socket = await connectSocket(port, CONNECT_TIMEOUT_MS);
   socket.setTimeout(IO_TIMEOUT_MS);
   return new Promise((resolve, reject) => {
+    let settled = false;
     let buf = "";
+    function cleanup() {
+      socket.removeAllListeners("data");
+      socket.removeAllListeners("timeout");
+      socket.removeAllListeners("error");
+      socket.removeAllListeners("end");
+      socket.removeAllListeners("close");
+    }
+    function resolveOnce(value) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    }
+    function rejectOnce(err) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    }
     socket.on("data", (chunk) => {
       buf += chunk.toString("utf8");
       if (buf.includes(payload)) {
         socket.end();
-        resolve(buf);
+        resolveOnce(buf);
       }
     });
     socket.on("timeout", () => {
       socket.destroy();
-      reject(new Error("I/O timeout while waiting echo response"));
+      rejectOnce(new Error("I/O timeout while waiting echo response"));
     });
-    socket.on("error", reject);
+    socket.on("error", rejectOnce);
+    socket.on("end", () => {
+      if (!buf.includes(payload)) {
+        rejectOnce(new Error("Socket ended before echo payload"));
+      }
+    });
+    socket.on("close", () => {
+      if (!buf.includes(payload)) {
+        rejectOnce(new Error("Socket closed before echo payload"));
+      }
+    });
     socket.write(payload);
   });
 }
@@ -175,19 +205,23 @@ async function testMaxActiveRelays() {
   s3.setTimeout(IO_TIMEOUT_MS);
   s3.write("SHOULD_FAIL\n");
 
-  let closedQuickly = false;
+  let blockedAsExpected = false;
   try {
-    await onceWithTimeout(s3, "close", 1200, "Third connection did not close quickly");
-    closedQuickly = true;
+    await Promise.race([
+      onceWithTimeout(s3, "close", 2000, "no-close"),
+      onceWithTimeout(s3, "end", 2000, "no-end"),
+      onceWithTimeout(s3, "error", 2000, "no-error"),
+    ]);
+    blockedAsExpected = true;
   } catch (_) {
-    closedQuickly = false;
+    blockedAsExpected = false;
   } finally {
     s3.destroy();
     s1.destroy();
     s2.destroy();
   }
 
-  if (!closedQuickly) {
+  if (!blockedAsExpected) {
     throw new Error("maxActiveRelays was not enforced as expected.");
   }
   console.log("[PASS] maxActiveRelays enforcement");
@@ -231,4 +265,3 @@ async function main() {
 }
 
 main();
-

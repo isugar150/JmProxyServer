@@ -36,6 +36,16 @@ Node.js 기반 e2e 테스트 스크립트를 제공합니다.
 node scripts/proxy_e2e_test.js
 ```
 
+부하 테스트(기본 에코 백엔드):
+```bash
+node scripts/proxy_load_test.js
+```
+
+부하 테스트(지연 응답 백엔드):
+```bash
+node scripts/proxy_load_test_slow.js
+```
+
 검증 항목:
 - 프록시 기본 릴레이 동작
 - `maxActiveRelays` 초과 시 신규 연결 제한 동작
