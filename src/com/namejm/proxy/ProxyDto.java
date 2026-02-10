@@ -38,6 +38,7 @@ public class ProxyDto {
     private int healthSuccessThreshold;
     private String lbStrategy;
     private int halfCloseLingerSeconds;
+    private int maxActiveRelays;
 
     public static class LbTarget {
         private String name;
@@ -126,6 +127,8 @@ public class ProxyDto {
     public void setLbStrategy(String lbStrategy) { this.lbStrategy = lbStrategy; }
     public int getHalfCloseLingerSeconds() { return halfCloseLingerSeconds; }
     public void setHalfCloseLingerSeconds(int halfCloseLingerSeconds) { this.halfCloseLingerSeconds = halfCloseLingerSeconds; }
+    public int getMaxActiveRelays() { return maxActiveRelays; }
+    public void setMaxActiveRelays(int maxActiveRelays) { this.maxActiveRelays = maxActiveRelays; }
 
     public boolean isInbound() {
         return "in".equalsIgnoreCase(type);
@@ -206,7 +209,11 @@ public class ProxyDto {
     }
 
     public int getHalfCloseLingerSecondsOrDefault() {
-        return halfCloseLingerSeconds > 0 ? halfCloseLingerSeconds : 120;
+        return halfCloseLingerSeconds >= 0 ? halfCloseLingerSeconds : 120;
+    }
+
+    public int getMaxActiveRelaysOrDefault() {
+        return maxActiveRelays > 0 ? maxActiveRelays : 10000;
     }
 
     @Override
@@ -234,6 +241,7 @@ public class ProxyDto {
                ", healthSuccessThreshold=" + healthSuccessThreshold +
                ", lbStrategy='" + lbStrategy + '\'' +
                ", halfCloseLingerSeconds=" + halfCloseLingerSeconds +
+               ", maxActiveRelays=" + maxActiveRelays +
                ", lb=" + lb +
                '}';
     }
@@ -314,6 +322,10 @@ public class ProxyDto {
         }
         if (halfCloseLingerSeconds < 0) {
             logger.error("Invalid halfCloseLingerSeconds '{}' for proxy '{}'. Must be 0 or greater.", halfCloseLingerSeconds, name);
+            valid = false;
+        }
+        if (maxActiveRelays < 0) {
+            logger.error("Invalid maxActiveRelays '{}' for proxy '{}'. Must be 0 or greater.", maxActiveRelays, name);
             valid = false;
         }
         String normalizedLbStrategy = getLbStrategyOrDefault();

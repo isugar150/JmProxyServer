@@ -136,6 +136,7 @@ class ProxyConfigLoader {
         dto.setHealthSuccessThreshold(parseInt(itemMap.get("healthSuccessThreshold"), "proxy[" + proxyName + "].healthSuccessThreshold", hasMappingError));
         dto.setLbStrategy(parseString(itemMap.get("lbStrategy")));
         dto.setHalfCloseLingerSeconds(parseInt(itemMap.get("halfCloseLingerSeconds"), "proxy[" + proxyName + "].halfCloseLingerSeconds", hasMappingError));
+        dto.setMaxActiveRelays(parseInt(itemMap.get("maxActiveRelays"), "proxy[" + proxyName + "].maxActiveRelays", hasMappingError));
         if (hasMappingError[0]) {
             return null;
         }

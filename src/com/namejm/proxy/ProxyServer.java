@@ -32,7 +32,8 @@ public class ProxyServer {
     private static volatile long configReloadDebounceMillis = 500L;
     private static volatile boolean hotReloadEnabled = true;
     private static volatile String activeGeoIpDbPath = DEFAULT_GEO_IP_DB_PATH;
-    private static final AtomicBoolean reloadInProgress = new AtomicBoolean(false);
+    private static final AtomicBoolean reloadRunning = new AtomicBoolean(false);
+    private static final AtomicBoolean reloadRequested = new AtomicBoolean(false);
     private static final ExecutorService reloadExecutor = new ThreadPoolExecutor(
         1,
         1,
@@ -45,7 +46,7 @@ public class ProxyServer {
             t.setDaemon(true);
             return t;
         },
-        new ThreadPoolExecutor.DiscardOldestPolicy()
+        new ThreadPoolExecutor.AbortPolicy()
     );
 
     public static void main(String[] args) {
@@ -207,19 +208,36 @@ public class ProxyServer {
     }
 
     private static void triggerAsyncReload(Path configFilePath) {
+        reloadRequested.set(true);
+        if (reloadRunning.compareAndSet(false, true)) {
+            try {
+                reloadExecutor.submit(() -> runReloadLoop(configFilePath));
+            } catch (Exception e) {
+                reloadRunning.set(false);
+                logger.warn("Reload task submission failed. Will retry on next change event.", e);
+            }
+        }
+    }
+
+    private static void runReloadLoop(Path configFilePath) {
         try {
-            reloadExecutor.submit(() -> reloadConfiguration(configFilePath));
-        } catch (Exception e) {
-            logger.warn("Reload task submission failed. Skipping this change event.", e);
+            while (running && reloadRequested.getAndSet(false)) {
+                reloadConfiguration(configFilePath);
+            }
+        } finally {
+            reloadRunning.set(false);
+            if (reloadRequested.get() && reloadRunning.compareAndSet(false, true)) {
+                try {
+                    reloadExecutor.submit(() -> runReloadLoop(configFilePath));
+                } catch (Exception e) {
+                    reloadRunning.set(false);
+                    logger.warn("Reload resubmission failed. Will retry on next change event.", e);
+                }
+            }
         }
     }
 
     private static void reloadConfiguration(Path configFilePath) {
-        if (!reloadInProgress.compareAndSet(false, true)) {
-            logger.debug("Reload already in progress. Coalescing duplicate config change event.");
-            return;
-        }
-
         try {
             ConfigLoadResult reloaded = configLoader.load(configFilePath.toString());
             if (reloaded == null) {
@@ -237,8 +255,6 @@ public class ProxyServer {
             logger.info("Configuration reload applied successfully. Active proxies: {}", reloaded.validConfigs.size());
         } catch (Exception e) {
             logger.error("Unexpected error during async configuration reload", e);
-        } finally {
-            reloadInProgress.set(false);
         }
     }
 

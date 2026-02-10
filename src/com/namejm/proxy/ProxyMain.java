@@ -11,6 +11,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -23,6 +24,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static ch.qos.logback.core.util.CloseUtil.closeQuietly;
 
@@ -40,9 +42,12 @@ public class ProxyMain {
     private final ExecutorService transferFallbackExecutor;
     private final ScheduledExecutorService transferTimeoutScheduler;
     private final ConcurrentHashMap<String, RelayContext> relayContexts = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, AtomicLong> warnLogGates = new ConcurrentHashMap<>();
 
     private ScheduledExecutorService healthCheckExecutor;
     private ExecutorService healthCheckProbeExecutor;
+    private final AtomicBoolean healthCheckCycleRunning = new AtomicBoolean(false);
+    private volatile int healthCheckProbeThreads = 1;
     private ServerSocket serverSocket;
     private volatile boolean isRunning = true;
 
@@ -63,7 +68,7 @@ public class ProxyMain {
         int maxPoolSize = config.getExecutorMaxPoolSizeOrDefault(corePoolSize);
         long keepAliveTime = config.getExecutorKeepAliveSecondsOrDefault();
         LinkedBlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<>(config.getExecutorQueueCapacityOrDefault());
-        RejectedExecutionHandler rejectionHandler = createBlockingPolicy(config.getName(), "acceptWorker", 200L);
+        RejectedExecutionHandler rejectionHandler = new ThreadPoolExecutor.AbortPolicy();
 
         this.executorService = new ThreadPoolExecutor(
             corePoolSize,
@@ -77,7 +82,7 @@ public class ProxyMain {
         int connectCoreThreads = Math.max(2, corePoolSize);
         int connectMaxThreads = Math.max(connectCoreThreads, maxPoolSize * 2);
         int connectQueueCapacity = Math.max(512, config.getExecutorQueueCapacityOrDefault() * 4);
-        RejectedExecutionHandler connectRejectionHandler = createBlockingPolicy(config.getName(), "upstreamConnect", 300L);
+        RejectedExecutionHandler connectRejectionHandler = new ThreadPoolExecutor.AbortPolicy();
         this.upstreamConnectExecutor = new ThreadPoolExecutor(
             connectCoreThreads,
             connectMaxThreads,
@@ -99,7 +104,7 @@ public class ProxyMain {
         transferCoreThreads = Math.min(transferCoreThreads, transferMaxThreads);
         int transferQueueCapacity = Math.max(256, config.getExecutorQueueCapacityOrDefault() * 2);
         transferQueueCapacity = Math.min(transferQueueCapacity, 4096);
-        RejectedExecutionHandler transferRejectionHandler = createBlockingPolicy(config.getName(), "transferPrimary", 200L);
+        RejectedExecutionHandler transferRejectionHandler = new ThreadPoolExecutor.AbortPolicy();
         ThreadPoolExecutor transferPool = new ThreadPoolExecutor(
             transferCoreThreads,
             transferMaxThreads,
@@ -120,7 +125,7 @@ public class ProxyMain {
         int fallbackCoreThreads = Math.max(2, Math.min(8, maxPoolSize));
         int fallbackMaxThreads = Math.max(fallbackCoreThreads, Math.min(32, maxPoolSize * 2));
         int fallbackQueueCapacity = Math.max(256, config.getExecutorQueueCapacityOrDefault() * 2);
-        RejectedExecutionHandler fallbackRejectionHandler = createBlockingPolicy(config.getName(), "transferFallback", 100L);
+        RejectedExecutionHandler fallbackRejectionHandler = new ThreadPoolExecutor.AbortPolicy();
         this.transferFallbackExecutor = new ThreadPoolExecutor(
             fallbackCoreThreads,
             fallbackMaxThreads,
@@ -179,7 +184,9 @@ public class ProxyMain {
                 try {
                     executorService.submit(() -> handleConnection(clientSocket));
                 } catch (RejectedExecutionException e) {
-                    logger.warn("{} - Connection rejected: worker queue is full. Closing client socket.", config.getName());
+                    if (shouldLogWarn("accept-rejected", 3000L)) {
+                        logger.warn("{} - Connection rejected: worker queue is full. Closing client socket.", config.getName());
+                    }
                     closeQuietly(clientSocket);
                 }
             } catch (IOException e) {
@@ -214,7 +221,9 @@ public class ProxyMain {
             upstreamConnectExecutor.submit(() -> establishAndRelay(clientSocket, clientIp));
             return true;
         } catch (RejectedExecutionException e) {
-            logger.warn("{} - Upstream connect rejected: worker queue is full.", config.getName());
+            if (shouldLogWarn("upstream-rejected", 3000L)) {
+                logger.warn("{} - Upstream connect rejected: worker queue is full.", config.getName());
+            }
             return false;
         }
     }
@@ -227,7 +236,9 @@ public class ProxyMain {
             startBidirectionalRelay(clientSocket, upstreamSocket);
             relayStarted = true;
         } catch (Exception e) {
-            logger.warn("{} - Upstream connection failed: {}", config.getName(), e.getMessage());
+            if (shouldLogWarn("upstream-connect-failed", 2000L)) {
+                logger.warn("{} - Upstream connection failed: {}", config.getName(), e.getMessage());
+            }
         } finally {
             if (!relayStarted) {
                 closeQuietly(clientSocket);
@@ -251,8 +262,10 @@ public class ProxyMain {
             } catch (IOException e) {
                 healthTracker.markUnreachable(target);
                 lastException = e;
-                logger.warn("{} - Forward target failed: {} ({}:{})",
-                    config.getName(), target.getName(), target.getHost(), target.getPort());
+                if (shouldLogWarn("target-failed:" + target.key(), 2000L)) {
+                    logger.warn("{} - Forward target failed: {} ({}:{})",
+                        config.getName(), target.getName(), target.getHost(), target.getPort());
+                }
             }
         }
 
@@ -269,6 +282,7 @@ public class ProxyMain {
         });
 
         int probeThreads = Math.max(2, Math.min(8, forwardTargets.size()));
+        healthCheckProbeThreads = probeThreads;
         healthCheckProbeExecutor = Executors.newFixedThreadPool(probeThreads, r -> {
             Thread thread = new Thread(r);
             thread.setName("ProxyHealthProbe-" + config.getName());
@@ -289,37 +303,57 @@ public class ProxyMain {
         if (!isRunning) {
             return;
         }
-
-        CountDownLatch latch = new CountDownLatch(forwardTargets.size());
-        for (ForwardTarget target : forwardTargets) {
-            try {
-                healthCheckProbeExecutor.submit(() -> {
-                    try {
-                        Socket socket = connectToTarget(target, config.getHealthCheckConnectTimeoutMillisOrDefault());
-                        closeQuietly(socket);
-                        healthTracker.markReachable(target);
-                    } catch (IOException e) {
-                        healthTracker.markUnreachable(target);
-                    } finally {
-                        latch.countDown();
-                    }
-                });
-            } catch (RejectedExecutionException e) {
-                latch.countDown();
-                if (isRunning) {
-                    healthTracker.markUnreachable(target);
-                }
-            }
+        if (!healthCheckCycleRunning.compareAndSet(false, true)) {
+            logger.debug("{} - Previous health check cycle still running. Skipping this cycle.", config.getName());
+            return;
         }
 
         try {
+            CountDownLatch latch = new CountDownLatch(forwardTargets.size());
+            Set<String> completedTargets = ConcurrentHashMap.newKeySet();
+            for (ForwardTarget target : forwardTargets) {
+                try {
+                    healthCheckProbeExecutor.submit(() -> {
+                        try {
+                            Socket socket = connectToTarget(target, config.getHealthCheckConnectTimeoutMillisOrDefault());
+                            closeQuietly(socket);
+                            healthTracker.markReachable(target);
+                        } catch (IOException e) {
+                            healthTracker.markUnreachable(target);
+                        } finally {
+                            completedTargets.add(target.key());
+                            latch.countDown();
+                        }
+                    });
+                } catch (RejectedExecutionException e) {
+                    latch.countDown();
+                    healthTracker.markUnreachable(target);
+                    logger.warn("{} - Health check task rejected for target {}. Marked as unreachable for this cycle.",
+                        config.getName(), target.getName());
+                }
+            }
+
+            int rounds = Math.max(1, (forwardTargets.size() + healthCheckProbeThreads - 1) / healthCheckProbeThreads);
             int timeoutMillis = Math.max(
-                config.getHealthCheckConnectTimeoutMillisOrDefault() + 1000,
+                rounds * config.getHealthCheckConnectTimeoutMillisOrDefault() + 1000,
                 1000
             );
-            latch.await(timeoutMillis, TimeUnit.MILLISECONDS);
+            boolean completed = latch.await(timeoutMillis, TimeUnit.MILLISECONDS);
+            if (!completed) {
+                int affected = 0;
+                for (ForwardTarget target : forwardTargets) {
+                    if (!completedTargets.contains(target.key())) {
+                        healthTracker.markUnreachable(target);
+                        affected++;
+                    }
+                }
+                logger.warn("{} - Health check cycle timed out after {}ms. Marked {} target(s) as unreachable for this cycle.",
+                    config.getName(), timeoutMillis, affected);
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        } finally {
+            healthCheckCycleRunning.set(false);
         }
     }
 
@@ -359,6 +393,16 @@ public class ProxyMain {
     }
 
     private void startBidirectionalRelay(Socket clientSocket, Socket serverSocket) {
+        if (relayContexts.size() >= config.getMaxActiveRelaysOrDefault()) {
+            if (shouldLogWarn("relay-cap-reached", 1000L)) {
+                logger.warn("{} - Active relay limit reached ({}). Closing new connection.",
+                    config.getName(), config.getMaxActiveRelaysOrDefault());
+            }
+            closeQuietly(clientSocket);
+            closeQuietly(serverSocket);
+            return;
+        }
+
         String relayId = config.getName() + "-" + System.nanoTime();
         RelayContext relayContext = new RelayContext(relayId, clientSocket, serverSocket);
         relayContexts.put(relayId, relayContext);
@@ -385,7 +429,9 @@ public class ProxyMain {
         try {
             transferExecutor.submit(() -> relayStream(relayContext, sourceSocket, destinationSocket, directionName));
         } catch (RejectedExecutionException e) {
-            logger.warn("{} - Transfer rejected on primary pool. Trying fallback pool.", config.getName());
+            if (shouldLogWarn("transfer-primary-rejected", 2000L)) {
+                logger.warn("{} - Transfer rejected on primary pool. Trying fallback pool.", config.getName());
+            }
             submitFallbackRelayTask(relayContext, sourceSocket, destinationSocket, directionName);
         }
     }
@@ -394,7 +440,9 @@ public class ProxyMain {
         try {
             transferFallbackExecutor.submit(() -> relayStream(relayContext, sourceSocket, destinationSocket, directionName));
         } catch (RejectedExecutionException ex) {
-            logger.warn("{} - Transfer rejected on fallback pool. Closing relay.", config.getName());
+            if (shouldLogWarn("transfer-fallback-rejected", 2000L)) {
+                logger.warn("{} - Transfer rejected on fallback pool. Closing relay.", config.getName());
+            }
             relayContext.closeOnce();
         }
     }
@@ -460,11 +508,14 @@ public class ProxyMain {
         private void markDirectionCompleted() {
             if (!oneDirectionCompleted.getAndSet(true)) {
                 if (config.getTransferTimeoutSecondsOrDefault() <= 0) {
-                    halfCloseFuture = transferTimeoutScheduler.schedule(
-                        this::closeOnce,
-                        config.getHalfCloseLingerSecondsOrDefault(),
-                        TimeUnit.SECONDS
-                    );
+                    int lingerSeconds = config.getHalfCloseLingerSecondsOrDefault();
+                    if (lingerSeconds > 0) {
+                        halfCloseFuture = transferTimeoutScheduler.schedule(
+                            this::closeOnce,
+                            lingerSeconds,
+                            TimeUnit.SECONDS
+                        );
+                    }
                 }
                 return;
             }
@@ -505,16 +556,16 @@ public class ProxyMain {
             logger.warn("Error closing server socket", e);
         }
 
+        relayContexts.forEach((id, relayContext) -> relayContext.closeOnce());
+        relayContexts.clear();
+
         shutdownExecutorGracefully(executorService, "acceptWorkerExecutor");
         shutdownExecutorGracefully(healthCheckProbeExecutor, "healthCheckProbeExecutor");
         shutdownScheduledExecutorGracefully(healthCheckExecutor, "healthCheckExecutor");
-
         shutdownExecutorGracefully(upstreamConnectExecutor, "upstreamConnectExecutor");
         shutdownExecutorGracefully(transferExecutor, "transferExecutor");
         shutdownExecutorGracefully(transferFallbackExecutor, "transferFallbackExecutor");
         shutdownScheduledExecutorGracefully(transferTimeoutScheduler, "transferTimeoutScheduler");
-        relayContexts.forEach((id, relayContext) -> relayContext.closeOnce());
-        relayContexts.clear();
     }
 
     private void shutdownExecutorGracefully(ExecutorService executor, String name) {
@@ -549,21 +600,11 @@ public class ProxyMain {
         }
     }
 
-    private RejectedExecutionHandler createBlockingPolicy(String proxyName, String poolName, long offerTimeoutMillis) {
-        return (runnable, executor) -> {
-            if (executor.isShutdown()) {
-                throw new RejectedExecutionException("Executor is shut down.");
-            }
-            try {
-                if (!executor.getQueue().offer(runnable, offerTimeoutMillis, TimeUnit.MILLISECONDS)) {
-                    throw new RejectedExecutionException(
-                        "Queue offer timed out for " + proxyName + ":" + poolName + " after " + offerTimeoutMillis + "ms"
-                    );
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RejectedExecutionException("Interrupted while waiting queue space.", e);
-            }
-        };
+    private boolean shouldLogWarn(String key, long intervalMillis) {
+        long now = System.currentTimeMillis();
+        AtomicLong gate = warnLogGates.computeIfAbsent(key, ignored -> new AtomicLong(0L));
+        long previous = gate.get();
+        return now - previous >= intervalMillis && gate.compareAndSet(previous, now);
     }
+
 }

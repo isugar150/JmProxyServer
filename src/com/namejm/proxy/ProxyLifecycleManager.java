@@ -10,35 +10,29 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 class ProxyLifecycleManager {
     private final Logger logger;
-    private final Object lock = new Object();
-    private final Map<String, ProxyMain> proxyInstances = new HashMap<>();
+    private final Map<String, ProxyMain> proxyInstances = new ConcurrentHashMap<>();
 
     ProxyLifecycleManager(Logger logger) {
         this.logger = logger;
     }
 
     void applyConfig(List<ProxyDto> newConfig, InetAddressLocator inetAddressLocator, String reason) {
-        synchronized (lock) {
-            applyConfigInternal(newConfig, inetAddressLocator, reason);
-        }
+        applyConfigInternal(newConfig, inetAddressLocator, reason);
     }
 
     void shutdownAll(String reason) {
-        synchronized (lock) {
-            List<String> names = new ArrayList<>(proxyInstances.keySet());
-            for (String name : names) {
-                stopProxy(name, reason);
-            }
+        List<String> names = new ArrayList<>(proxyInstances.keySet());
+        for (String name : names) {
+            stopProxy(name, reason);
         }
     }
 
     int getActiveProxyCount() {
-        synchronized (lock) {
-            return proxyInstances.size();
-        }
+        return proxyInstances.size();
     }
 
     // Executor 기반 lifecycle을 제거했으므로 호환용 no-op으로 유지
@@ -211,6 +205,7 @@ class ProxyLifecycleManager {
         if (currentConfig.getHealthFailThreshold() != newConfig.getHealthFailThreshold()) return false;
         if (currentConfig.getHealthSuccessThreshold() != newConfig.getHealthSuccessThreshold()) return false;
         if (currentConfig.getHalfCloseLingerSeconds() != newConfig.getHalfCloseLingerSeconds()) return false;
+        if (currentConfig.getMaxActiveRelays() != newConfig.getMaxActiveRelays()) return false;
 
         List<ProxyDto.LbTarget> currentLb = currentConfig.getLb();
         List<ProxyDto.LbTarget> newLb = newConfig.getLb();

@@ -46,6 +46,7 @@ proxy:
     allowedCountries: [KR, US, private, localhost] # 허용 원본: 국가코드/private/localhost/Any
     transferTimeoutSeconds: 0 # 양방향 전송 최대시간(초), 0이면 무제한
     halfCloseLingerSeconds: 120 # transferTimeoutSeconds=0일 때 half-close 최대 유지시간(초)
+    maxActiveRelays: 2000 # 동시에 유지할 최대 relay 수(용도/서버 스펙에 맞춰 조정)
     clientSoTimeoutMillis: 0 # 클라이언트 소켓 read 타임아웃(ms), 0이면 무제한
     forwardSoTimeoutMillis: 0 # 타깃 소켓 read 타임아웃(ms), 0이면 무제한
 
@@ -61,6 +62,7 @@ proxy:
     forwardConnectTimeoutMillis: 5000 # 타깃 연결 타임아웃(ms)
     transferTimeoutSeconds: 0 # 전송 최대시간(초), 0이면 무제한
     halfCloseLingerSeconds: 120 # transferTimeoutSeconds=0일 때 half-close 최대 유지시간(초)
+    maxActiveRelays: 2000 # 동시에 유지할 최대 relay 수(용도/서버 스펙에 맞춰 조정)
     lb: # 라운드로빈 대상 목록
       - name: lb1 # 타깃 식별자(로그용)
         forwardHost: 10.1.3.201 # 타깃1 호스트
@@ -109,6 +111,7 @@ proxy:
 | `forwardSoTimeoutMillis` | 타깃 소켓 read 타임아웃(ms), `0`은 무제한 | `0` |
 | `transferTimeoutSeconds` | 전체 전송 최대시간(초), `0`은 무제한 | `0` |
 | `halfCloseLingerSeconds` | `transferTimeoutSeconds=0`일 때 half-close 최대 유지시간(초) | `120` |
+| `maxActiveRelays` | 동시에 유지할 최대 relay 수 | `10000` |
 | `global.hotReloadEnabled` | 설정 자동 재적용 활성화 여부 | `true` |
 | `global.hotReloadWatchIntervalMillis` | 설정 변경 감지 주기(ms) | `2000` |
 | `global.hotReloadDebounceMillis` | 저장 직후 재적용 지연(ms) | `500` |
