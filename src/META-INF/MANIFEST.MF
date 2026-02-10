@@ -1,3 +1,5 @@
 Manifest-Version: 1.0
 Main-Class: com.namejm.proxy.ProxyServer
+Class-Path: lib/geoip2-4.2.1.jar  lib/logback-classic-1.2.4.jar  lib/logback-core-1.2.4.jar  lib/maxmind-db-3.1.1.jar  lib/slf4j-api-1.7.32.jar  lib/snakeyaml-1.29.jar
+
 

@@ -12,8 +12,8 @@
   - `ConnectionPolicy`: allow/deny policy (`any`, `private`, `localhost`, country code).
   - `ProxyDto`: configuration schema and validation.
 - `src/META-INF/MANIFEST.MF`: JAR entry point metadata (`Main-Class: com.namejm.proxy.ProxyServer`).
-- `resources/logback.xml`: logging configuration bundled on classpath.
 - `config/application.yml`: runtime proxy rules (`proxy` + optional `global`); `config/GeoLite2-Country.mmdb`: GeoIP database.
+- `config/logback.xml`: external logging configuration file used at runtime.
 - `lib/*.jar`: third-party dependencies (SnakeYAML, SLF4J, Logback, GeoIP2).
 - `bin/startup.bat` and `bin/startup.sh`: production-style launch scripts for `JmProxyServer.jar`.
 
@@ -25,7 +25,7 @@ javac -encoding UTF-8 -cp "lib/*" -d out src/com/namejm/proxy/*.java
 ```
 - Package a runnable JAR:
 ```powershell
-jar cfm JmProxyServer.jar src/META-INF/MANIFEST.MF -C out . -C resources .
+jar cfm JmProxyServer.jar src/META-INF/MANIFEST.MF -C out .
 ```
 - Run with default config:
 ```powershell
@@ -42,7 +42,7 @@ java -jar JmProxyServer.jar .\config\application.yml
 `bin\\startup.bat` or `bin/startup.sh`.
 
 ## Coding Style & Naming Conventions
-- Target JDK 17 (`.idea/misc.xml`), 4-space indentation, UTF-8 encoding.
+- Target JDK 11+ compatible code, 4-space indentation, UTF-8 encoding.
 - Use package `com.namejm.proxy`; class names in `PascalCase`, methods/fields in `camelCase`, constants in `UPPER_SNAKE_CASE`.
 - Keep logging through SLF4J (`LoggerFactory.getLogger(...)`); avoid `System.out` except startup banner text.
 - Keep `ProxyMain` orchestration-only; add reusable logic to dedicated classes under `src/com/namejm/proxy`.

@@ -16,9 +16,13 @@ JmProxyServer는 프록시 프로그램이며, 쉬운 설정, 국가 및 내부�
 ## 실행
 ```bash
 javac -encoding UTF-8 -cp "lib/*" -d out src/com/namejm/proxy/*.java
-jar cfm JmProxyServer.jar src/META-INF/MANIFEST.MF -C out . -C resources .
-java -jar JmProxyServer.jar
+jar cfm JmProxyServer.jar src/META-INF/MANIFEST.MF -C out .
+java -jar JmProxyServer.jar .\config\application.yml
 ```
+
+권장 실행(로그 설정 포함):
+- Windows: `bin\startup.bat`
+- Linux: `bin/startup.sh`
 
 ## 설정 방법
 ```yaml
