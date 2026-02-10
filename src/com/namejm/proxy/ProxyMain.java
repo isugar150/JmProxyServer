@@ -24,6 +24,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static ch.qos.logback.core.util.CloseUtil.closeQuietly;
@@ -43,6 +44,7 @@ public class ProxyMain {
     private final ScheduledExecutorService transferTimeoutScheduler;
     private final ConcurrentHashMap<String, RelayContext> relayContexts = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, AtomicLong> warnLogGates = new ConcurrentHashMap<>();
+    private final AtomicInteger activeRelayCount = new AtomicInteger(0);
 
     private ScheduledExecutorService healthCheckExecutor;
     private ExecutorService healthCheckProbeExecutor;
@@ -393,7 +395,7 @@ public class ProxyMain {
     }
 
     private void startBidirectionalRelay(Socket clientSocket, Socket serverSocket) {
-        if (relayContexts.size() >= config.getMaxActiveRelaysOrDefault()) {
+        if (!acquireRelaySlot()) {
             if (shouldLogWarn("relay-cap-reached", 1000L)) {
                 logger.warn("{} - Active relay limit reached ({}). Closing new connection.",
                     config.getName(), config.getMaxActiveRelaysOrDefault());
@@ -537,6 +539,7 @@ public class ProxyMain {
             closeQuietly(clientSocket);
             closeQuietly(serverSocket);
             relayContexts.remove(id);
+            activeRelayCount.decrementAndGet();
             return true;
         }
     }
@@ -605,6 +608,19 @@ public class ProxyMain {
         AtomicLong gate = warnLogGates.computeIfAbsent(key, ignored -> new AtomicLong(0L));
         long previous = gate.get();
         return now - previous >= intervalMillis && gate.compareAndSet(previous, now);
+    }
+
+    private boolean acquireRelaySlot() {
+        int maxRelays = config.getMaxActiveRelaysOrDefault();
+        while (true) {
+            int current = activeRelayCount.get();
+            if (current >= maxRelays) {
+                return false;
+            }
+            if (activeRelayCount.compareAndSet(current, current + 1)) {
+                return true;
+            }
+        }
     }
 
 }

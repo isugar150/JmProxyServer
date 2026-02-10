@@ -24,6 +24,22 @@ java -jar JmProxyServer.jar .\config\application.yml
 - Windows: `bin\startup.bat`
 - Linux: `bin/startup.sh`
 
+## 테스트 실행
+Node.js 기반 e2e 테스트 스크립트를 제공합니다.
+
+사전 요구사항:
+- Java 11+
+- Node.js 18+
+
+실행:
+```bash
+node scripts/proxy_e2e_test.js
+```
+
+검증 항목:
+- 프록시 기본 릴레이 동작
+- `maxActiveRelays` 초과 시 신규 연결 제한 동작
+
 ## 설정 방법
 ```yaml
 global:

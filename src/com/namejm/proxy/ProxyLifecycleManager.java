@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 class ProxyLifecycleManager {
     private final Logger logger;
+    private final Object lifecycleLock = new Object();
     private final Map<String, ProxyMain> proxyInstances = new ConcurrentHashMap<>();
 
     ProxyLifecycleManager(Logger logger) {
@@ -21,18 +22,24 @@ class ProxyLifecycleManager {
     }
 
     void applyConfig(List<ProxyDto> newConfig, InetAddressLocator inetAddressLocator, String reason) {
-        applyConfigInternal(newConfig, inetAddressLocator, reason);
+        synchronized (lifecycleLock) {
+            applyConfigInternal(newConfig, inetAddressLocator, reason);
+        }
     }
 
     void shutdownAll(String reason) {
-        List<String> names = new ArrayList<>(proxyInstances.keySet());
-        for (String name : names) {
-            stopProxy(name, reason);
+        synchronized (lifecycleLock) {
+            List<String> names = new ArrayList<>(proxyInstances.keySet());
+            for (String name : names) {
+                stopProxy(name, reason);
+            }
         }
     }
 
     int getActiveProxyCount() {
-        return proxyInstances.size();
+        synchronized (lifecycleLock) {
+            return proxyInstances.size();
+        }
     }
 
     // Executor 기반 lifecycle을 제거했으므로 호환용 no-op으로 유지
