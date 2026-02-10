@@ -10,6 +10,8 @@ const REQUESTS_PER_CONNECTION = Number(process.env.REQUESTS_PER_CONNECTION || 20
 const CONNECT_TIMEOUT_MS = Number(process.env.CONNECT_TIMEOUT_MS || 3000);
 const IO_TIMEOUT_MS = Number(process.env.IO_TIMEOUT_MS || 5000);
 const START_BACKEND = (process.env.START_BACKEND || "true").toLowerCase() !== "false";
+const TEST_TIMEOUT_MS = Number(process.env.TEST_TIMEOUT_MS || 300000);
+const PROGRESS_INTERVAL_MS = Number(process.env.PROGRESS_INTERVAL_MS || 5000);
 
 function nowMs() {
   return Date.now();
@@ -170,6 +172,7 @@ function percentile(sortedArr, p) {
 
 async function main() {
   let backend = null;
+  let progressTimer = null;
   try {
     if (START_BACKEND) {
       backend = await startEchoServer(BACKEND_PORT);
@@ -177,7 +180,28 @@ async function main() {
     await waitForProxyOpen(PROXY_PORT, 15000);
 
     const start = nowMs();
-    const results = await Promise.all(Array.from({ length: CONNECTIONS }, (_, i) => runWorker(i + 1)));
+    let completedWorkers = 0;
+    let completedRequests = 0;
+    const total = CONNECTIONS * REQUESTS_PER_CONNECTION;
+    const workerPromises = Array.from({ length: CONNECTIONS }, (_, i) =>
+      runWorker(i + 1).then((r) => {
+        completedWorkers++;
+        completedRequests += r.ok + r.fail;
+        return r;
+      })
+    );
+
+    progressTimer = setInterval(() => {
+      const elapsed = nowMs() - start;
+      const pct = ((completedRequests / Math.max(1, total)) * 100).toFixed(2);
+      console.log(`PROGRESS workers=${completedWorkers}/${CONNECTIONS} requests=${completedRequests}/${total} (${pct}%) elapsed_ms=${elapsed}`);
+    }, Math.max(1000, PROGRESS_INTERVAL_MS));
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`persistent load timeout after ${TEST_TIMEOUT_MS}ms`)), Math.max(1000, TEST_TIMEOUT_MS));
+    });
+
+    const results = await Promise.race([Promise.all(workerPromises), timeoutPromise]);
     const elapsedMs = nowMs() - start;
 
     let ok = 0;
@@ -189,7 +213,6 @@ async function main() {
       latencies.push(...r.latencies);
     }
 
-    const total = CONNECTIONS * REQUESTS_PER_CONNECTION;
     const sorted = latencies.slice().sort((a, b) => a - b);
     const avgLatency = latencies.length ? latencies.reduce((s, v) => s + v, 0) / latencies.length : 0;
     const rps = (ok / Math.max(1, elapsedMs)) * 1000;
@@ -216,6 +239,9 @@ async function main() {
     console.error("PERSISTENT_LOAD_TEST_FAILED:", err.message);
     process.exitCode = 1;
   } finally {
+    if (progressTimer) {
+      clearInterval(progressTimer);
+    }
     if (backend) {
       await backend.close();
     }

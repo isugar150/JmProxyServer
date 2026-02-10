@@ -51,9 +51,28 @@ node scripts/proxy_load_test_slow.js
 node scripts/proxy_load_test_persistent.js
 ```
 
+통합 테스트(단명/장명/LB/대용량 트래픽):
+```bash
+node scripts/proxy_integration_test.js
+```
+
+통합 테스트 랜덤 연결 시간(기본 1초~60초):
+```bash
+# 단명/장명 랜덤 구간 조정 예시
+$env:SHORT_MIN_MS='1000'
+$env:SHORT_MAX_MS='60000'
+$env:LONG_MIN_MS='1000'
+$env:LONG_MAX_MS='60000'
+node scripts/proxy_integration_test.js
+```
+
 검증 항목:
 - 프록시 기본 릴레이 동작
 - `maxActiveRelays` 초과 시 신규 연결 제한 동작
+- 단명 커넥션 랜덤 지속 시간(1~60초) 반복 요청
+- 장명 커넥션 랜덤 지속 시간(1~60초) 유지 요청
+- LB 라운드로빈 분산 확인(B1/B2 모두 처리)
+- 대용량 동시 요청 처리 확인
 
 ## 성능 측정 가이드
 - `proxy_load_test.js`는 요청마다 새 TCP 연결을 생성하는 단명 커넥션 부하입니다.

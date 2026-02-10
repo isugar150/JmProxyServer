@@ -117,6 +117,11 @@ java -cp "out;lib/*" com.namejm.proxy.ProxyServer config/loadtest.application.ym
   - Load scripts print `LOAD_TEST_RESULT` with success rate and latency percentiles.
   - Current load script returns exit code `1` when any request fails (`fail > 0`), even when test finishes correctly.
   - If port conflict occurs (`EADDRINUSE`), stop existing process on `19310` / `19320` first.
+  - If proxy was started as a separate process for testing, always terminate it after tests complete.
+  - Windows cleanup example:
+```powershell
+Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'java.exe' -and $_.CommandLine -like '*com.namejm.proxy.ProxyServer*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
 
 ## Commit & Pull Request Guidelines
 - Prefer concise subject lines under 72 chars; include scope when useful (example: `proxy: improve private IP filtering`).
