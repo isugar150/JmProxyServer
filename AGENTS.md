@@ -119,7 +119,6 @@ java -cp "out;lib/*" com.namejm.proxy.ProxyServer config/loadtest.application.ym
   - If port conflict occurs (`EADDRINUSE`), stop existing process on `19310` / `19320` first.
 
 ## Commit & Pull Request Guidelines
-- Recent history uses short, imperative messages (often Korean), e.g., `로직 개선`, `Update ProxyDto.java`.
 - Prefer concise subject lines under 72 chars; include scope when useful (example: `proxy: improve private IP filtering`).
 - PRs should include: what changed, why, local verification steps, and config/runtime impact (ports, LB options, timeout values, GeoIP DB path).
 - When changing configuration behavior, update both `README.md` and the commented sample in `config/application.yml` in the same PR.
