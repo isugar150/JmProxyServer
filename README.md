@@ -7,6 +7,7 @@ JmProxyServer는 프록시 프로그램이며, 쉬운 설정, 국가 및 내부�
 - `out`은 일반 SOCKS/HTTP CONNECT 프록시가 아니라, 고정 대상(`forwardHost:forwardPort` 또는 `lb`)으로 전달하는 모드입니다.
 - `lb` 설정 시 라운드로빈 + 헬스체크 + 자동 페일오버가 동작합니다.
 - `lbStrategy: ip_hash` 설정 시 같은 클라이언트 IP는 동일한 LB 타깃으로 우선 라우팅됩니다(장애 시 페일오버).
+- 서버 실행 중 `application.yml`이 변경되면 약 2초 이내 자동 감지되어 재적용됩니다(재기동 불필요).
 
 ## Preview
 ![image](https://user-images.githubusercontent.com/13088077/127344946-e0eb0144-2ef5-4c58-bcb7-290e19d95fa2.png)  
@@ -22,6 +23,10 @@ java -jar JmProxyServer.jar
 ## 설정 방법
 ```yaml
 global:
+  hotReloadEnabled: true # true: 자동 재적용 활성, false: 비활성
+  hotReloadWatchIntervalMillis: 2000 # 변경 감지 주기(ms)
+  hotReloadDebounceMillis: 500 # 파일 저장 직후 재로드 지연(ms)
+  geoIpDbPath: ./config/GeoLite2-Country.mmdb # GeoIP DB 경로
   executorCorePoolSize: 0 # 워커 코어 스레드 수, 0이면 CPU 코어 수
   executorMaxPoolSize: 0 # 워커 최대 스레드 수, 0이면 코어*2
   executorKeepAliveSeconds: 60 # 워커 유휴 스레드 유지시간(초)
@@ -68,12 +73,14 @@ proxy:
 ```
 
 ## 모듈 구조
-- `ProxyServer`: 설정 로딩/시작
+- `ProxyServer`: 부트스트랩/오케스트레이션(초기 로드, 리로드 감시)
+- `ProxyConfigLoader`: YAML 파싱, 전역 옵션 병합, 설정 유효성 필터링
+- `ProxyLifecycleManager`: 프록시 인스턴스 시작/종료/재적용
 - `ProxyMain`: 연결 수락/전송 오케스트레이션
-- `ForwardTargetSelector`: 라운드로빈 후보 선택
 - `ForwardTargetSelector`: LB 후보 선택(라운드로빈 / IP 해시)
 - `TargetHealthTracker`: 헬스 상태 전이(임계치 기반)
 - `ConnectionPolicy`: 국가/내부망/루프백 허용 정책
+- `GlobalConfig`, `ConfigLoadResult`: 로더 내부 설정 모델
 
 ## 설정 키 설명
 | 키 | 설명 | 기본값 |
@@ -95,6 +102,10 @@ proxy:
 | `clientSoTimeoutMillis` | 클라이언트 소켓 read 타임아웃(ms), `0`은 무제한 | `0` |
 | `forwardSoTimeoutMillis` | 타깃 소켓 read 타임아웃(ms), `0`은 무제한 | `0` |
 | `transferTimeoutSeconds` | 전체 전송 최대시간(초), `0`은 무제한 | `0` |
+| `global.hotReloadEnabled` | 설정 자동 재적용 활성화 여부 | `true` |
+| `global.hotReloadWatchIntervalMillis` | 설정 변경 감지 주기(ms) | `2000` |
+| `global.hotReloadDebounceMillis` | 저장 직후 재적용 지연(ms) | `500` |
+| `global.geoIpDbPath` | GeoIP DB 파일 경로 | `./config/GeoLite2-Country.mmdb` |
 | `global.executorCorePoolSize` | 전역 워커 코어 스레드 수 | `CPU 코어 수` |
 | `global.executorMaxPoolSize` | 전역 워커 최대 스레드 수 | `core*2` |
 | `global.executorKeepAliveSeconds` | 전역 워커 유휴 스레드 유지시간(초) | `60` |

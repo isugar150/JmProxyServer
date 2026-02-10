@@ -2,7 +2,10 @@
 
 ## Project Structure & Module Organization
 - `src/com/namejm/proxy`: core Java source.
-  - `ProxyServer`: app entry point and YAML loading.
+  - `ProxyServer`: app entry point and orchestration only.
+  - `ProxyConfigLoader`: YAML loading/parsing, global option merge, validation filtering.
+  - `ProxyLifecycleManager`: start/stop/reload lifecycle for proxy instances.
+  - `GlobalConfig`, `ConfigLoadResult`: configuration transfer models used by loader/server.
   - `ProxyMain`: runtime orchestration (accept loop, forwarding, scheduler).
   - `ForwardTarget`, `ForwardTargetSelector`: target model and LB candidate selection (`round_robin`, `ip_hash`).
   - `TargetHealthTracker`: health state transitions with fail/success thresholds.

@@ -1,4 +1,9 @@
 global:
+  # application.yml 변경 시 서버가 자동으로 감지하여 재적용합니다(재기동 불필요).
+  hotReloadEnabled: true # true: 자동 재적용 활성, false: 비활성
+  hotReloadWatchIntervalMillis: 2000 # 변경 감지 주기(ms), 기본 2000
+  hotReloadDebounceMillis: 500 # 파일 저장 직후 재로드 지연(ms), 기본 500
+  geoIpDbPath: ./config/GeoLite2-Country.mmdb # GeoIP DB 경로, 기본 ./config/GeoLite2-Country.mmdb
   executorCorePoolSize: 0 # 워커 코어 스레드 수, 0이면 CPU 코어 수
   executorMaxPoolSize: 0 # 워커 최대 스레드 수, 0이면 코어*2
   executorKeepAliveSeconds: 60 # 워커 유휴 스레드 유지시간(초), 미설정 시 60

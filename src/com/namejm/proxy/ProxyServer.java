@@ -2,28 +2,26 @@ package com.namejm.proxy;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.yaml.snakeyaml.Yaml;
-import org.yaml.snakeyaml.constructor.Constructor;
 
 import java.io.*;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 
 public class ProxyServer {
-    final private static Logger logger = LoggerFactory.getLogger(ProxyServer.class);
-    private static List<ProxyDto> config = null;
-    private static InetAddressLocator inetAddressLocator;
-    private static final List<ProxyMain> proxyInstances = new ArrayList<>();
+    private static final Logger logger = LoggerFactory.getLogger(ProxyServer.class);
+    private static final String DEFAULT_CONFIG_PATH = "./config/application.yml";
+    private static final String DEFAULT_GEO_IP_DB_PATH = "./config/GeoLite2-Country.mmdb";
 
-    private static class GlobalConfig {
-        private Integer executorCorePoolSize;
-        private Integer executorMaxPoolSize;
-        private Integer executorKeepAliveSeconds;
-        private Integer executorQueueCapacity;
-        private Integer shutdownAwaitSeconds;
-    }
-    public static void main(String args[]){
+    private static final ProxyConfigLoader configLoader = new ProxyConfigLoader(logger);
+    private static final ProxyLifecycleManager lifecycleManager = new ProxyLifecycleManager(logger);
+
+    private static InetAddressLocator inetAddressLocator;
+    private static volatile boolean running = true;
+    private static volatile Thread configWatcherThread;
+    private static volatile long configWatchIntervalMillis = 2000L;
+    private static volatile long configReloadDebounceMillis = 500L;
+    private static volatile boolean hotReloadEnabled = true;
+    private static volatile String activeGeoIpDbPath = DEFAULT_GEO_IP_DB_PATH;
+
+    public static void main(String[] args) {
         System.out.println("       _           _____                      _____                          \n" +
                 "      | |         |  __ \\                    / ____|                         \n" +
                 "      | |_ __ ___ | |__) | __ _____  ___   _| (___   ___ _ ____   _____ _ __ \n" +
@@ -34,78 +32,34 @@ public class ProxyServer {
                 "                                       |___/                                 \n" +
                 "Copyright © 2021 Jm's Corp All rights reserved.\n");
 
-        // --- 설정 파일 경로 처리 ---
-        String configPath = "./config/application.yml"; // 기본 경로
+        String configPath = DEFAULT_CONFIG_PATH;
         if (args.length > 0) {
-            configPath = args[0]; // 첫 번째 인자를 설정 파일 경로로 사용
+            configPath = args[0];
             logger.info("Using configuration file from argument: {}", configPath);
         } else {
             logger.info("Using default configuration file: {}", configPath);
         }
 
-        // --- GeoIP 데이터베이스 로드 ---
-        String geoIpDbPath = "./config/GeoLite2-Country.mmdb"; // 기본 경로 또는 설정에서 읽기
         try {
-            inetAddressLocator = new InetAddressLocator(geoIpDbPath);
-        } catch (IOException e) {
-            logger.error("Failed to load GeoIP database: {}", geoIpDbPath, e);
-            System.exit(1); // DB 로드 실패 시 종료
-            return;
-        }
-
-        try {
-            Yaml yaml = new Yaml();
-            Map<String, Object> rawConfig; // SnakeYAML이 Map으로 파싱하도록 변경
-            try {
-                rawConfig = yaml.load(new FileReader(configPath));
-            } catch (FileNotFoundException e) {
-                logger.error("Configuration file not found at path: {}", configPath, e);
+            ConfigLoadResult initialLoad = configLoader.load(configPath);
+            if (initialLoad == null) {
+                logger.error("Failed to load initial configuration from {}", configPath);
                 System.exit(1);
                 return;
             }
 
-            // --- 설정 파싱 ---
-            config = parseProxyConfig(rawConfig);
-            if (config == null) {
-                logger.error("Failed to parse proxy configurations.");
+            if (!initializeGeoIpLocator(initialLoad.globalConfig)) {
                 System.exit(1);
                 return;
             }
-
-            for (int i = 0; i < config.size(); i++) {
-                final ProxyDto proxyConfig = config.get(i);
-
-                logger.info("Processing proxy config [{}]: {}", i, proxyConfig);
-
-                // 설정 유효성 검사
-                if (!isValidConfig(proxyConfig)) {
-                    logger.warn("Skipping invalid proxy configuration: {}", proxyConfig.getName());
-                    continue;
-                }
-
-                logger.info("Creating startup thread for proxy:  {}", proxyConfig.getName());
-
-                // ProxyMain 인스턴스 생성 및 시작
-                Thread proxyThread = new Thread(() -> {
-                    try {
-                        logger.info("Thread started for proxy: {}. Creating ProxyMain instance...", proxyConfig.getName());
-                        ProxyMain proxyMain = new ProxyMain(proxyConfig, inetAddressLocator);
-                        proxyInstances.add(proxyMain);
-                        logger.info("Starting ProxyMain for proxy: {}", proxyConfig.getName());
-                        proxyMain.start();
-                        logger.info("ProxyMain started successfully for proxy: {}", proxyConfig.getName());
-                    } catch (IOException e) {
-                        logger.error("!!! Failed to start proxy '{}': {}", proxyConfig.getName(), e.getMessage(), e);
-                    } catch (Exception e) {
-                        logger.error("!!! Unexpected error during proxy startup '{}': {}", proxyConfig.getName(), e.getMessage(), e);
-                    }
-                });
-                proxyThread.setName("ProxyStarter-" + proxyConfig.getName());
-                proxyThread.start();
-            }
-
-            // --- Graceful Shutdown 설정 ---
+            applyRuntimeOptions(initialLoad.globalConfig);
+            lifecycleManager.applyConfig(initialLoad.validConfigs, inetAddressLocator, "initial load");
             addShutdownHook();
+            if (hotReloadEnabled) {
+                startConfigWatcher(configPath);
+            } else {
+                logger.info("Hot reload is disabled by configuration.");
+            }
         } catch (Exception e) {
             logger.error(e.getMessage());
             StringWriter sw = new StringWriter();
@@ -118,121 +72,126 @@ public class ProxyServer {
     // --- Graceful Shutdown Hook 추가 ---
     private static void addShutdownHook() {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            logger.info("Shutdown hook triggered. Shutting down proxy servers...");
-            synchronized (proxyInstances) {
-                for (ProxyMain proxy : proxyInstances) {
-                    try {
-                        logger.info("Shutting down proxy: {}", proxy.getConfig().getName());
-                        proxy.shutdown();
-                    } catch (Exception e) {
-                        logger.error("Error shutting down proxy: {}",
-                                     (proxy.getConfig() != null ? proxy.getConfig().getName() : "Unknown Proxy"), e);
-                    }
-                }
+            running = false;
+            if (configWatcherThread != null) {
+                configWatcherThread.interrupt();
             }
+            logger.info("Shutdown hook triggered. Shutting down proxy servers...");
+            lifecycleManager.shutdownAll("shutdown hook");
             logger.info("All proxy servers shut down.");
         }, "ProxyShutdownHook"));
     }
 
-    // 설정 파싱 메서드
-    private static List<ProxyDto> parseProxyConfig(Map<String, Object> rawConfig) {
-        List<ProxyDto> proxyList = new ArrayList<>();
-        Object proxyObj = rawConfig.get("proxy");
-        GlobalConfig globalConfig = parseGlobalConfig(rawConfig);
+    private static void startConfigWatcher(String configPath) {
+        File configFile = new File(configPath);
+        long initialLastModified = configFile.exists() ? configFile.lastModified() : 0L;
 
-        if (!(proxyObj instanceof List)) {
-            logger.error("'proxy' configuration should be a list.");
-            return null;
-        }
+        configWatcherThread = new Thread(() -> watchConfigChanges(configPath, configFile, initialLastModified), "ProxyConfigWatcher");
+        configWatcherThread.setDaemon(false);
+        configWatcherThread.start();
+        logger.info("Config watcher started for: {}", configFile.getAbsolutePath());
+    }
 
-        List<?> rawProxyList = (List<?>) proxyObj;
-        Yaml mapYaml = new Yaml();
-
-        for (int i = 0; i < rawProxyList.size(); i++) {
-            Object item = rawProxyList.get(i);
-            if (!(item instanceof Map)) {
-                logger.warn("Item at index {} in 'proxy' list is not a map, skipping.", i);
-                continue;
-            }
+    private static void watchConfigChanges(String configPath, File configFile, long lastModified) {
+        long currentLastModified = lastModified;
+        while (running && !Thread.currentThread().isInterrupted()) {
             try {
-                Yaml dtoYaml = new Yaml(new Constructor(ProxyDto.class));
-                ProxyDto proxyDto = dtoYaml.load(mapYaml.dump(item));
-
-                if (proxyDto != null) {
-                    applyGlobalConfig(proxyDto, globalConfig);
-                    proxyList.add(proxyDto);
-                } else {
-                     logger.warn("Failed to parse proxy configuration at index {}, skipping.", i);
+                if (!hotReloadEnabled) {
+                    logger.info("Hot reload disabled. Config watcher is stopping.");
+                    break;
                 }
+
+                long fileLastModified = configFile.exists() ? configFile.lastModified() : 0L;
+                if (fileLastModified > 0L && fileLastModified != currentLastModified) {
+                    logger.info("Configuration change detected. Reloading: {}", configFile.getAbsolutePath());
+                    Thread.sleep(configReloadDebounceMillis);
+
+                    ConfigLoadResult reloaded = configLoader.load(configPath);
+                    if (reloaded == null) {
+                        logger.warn("Configuration reload failed. Keeping current runtime configuration.");
+                        currentLastModified = fileLastModified;
+                    } else if (reloaded.validConfigs.isEmpty() && !reloaded.parsedConfigs.isEmpty()) {
+                        logger.warn("Reloaded configuration has no valid proxy entries. Keeping current runtime configuration.");
+                        currentLastModified = fileLastModified;
+                    } else {
+                        refreshGeoIpLocatorIfNeeded(reloaded.globalConfig);
+                        applyRuntimeOptions(reloaded.globalConfig);
+                        lifecycleManager.applyConfig(reloaded.validConfigs, inetAddressLocator, "config reload");
+                        currentLastModified = fileLastModified;
+                        logger.info("Configuration reload applied successfully. Active proxies: {}", reloaded.validConfigs.size());
+                    }
+                }
+
+                Thread.sleep(configWatchIntervalMillis);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             } catch (Exception e) {
-                logger.error("Error parsing proxy configuration at index {}: {}", i, e.getMessage(), e);
+                logger.error("Unexpected error in config watcher loop", e);
             }
         }
-        return proxyList;
+        logger.info("Config watcher stopped.");
     }
 
-    private static GlobalConfig parseGlobalConfig(Map<String, Object> rawConfig) {
-        GlobalConfig globalConfig = new GlobalConfig();
-        Object globalObj = rawConfig.get("global");
-        if (!(globalObj instanceof Map)) {
-            return globalConfig;
-        }
-        Map<?, ?> globalMap = (Map<?, ?>) globalObj;
-
-        globalConfig.executorCorePoolSize = parseInteger(globalMap.get("executorCorePoolSize"), "global.executorCorePoolSize");
-        globalConfig.executorMaxPoolSize = parseInteger(globalMap.get("executorMaxPoolSize"), "global.executorMaxPoolSize");
-        globalConfig.executorKeepAliveSeconds = parseInteger(globalMap.get("executorKeepAliveSeconds"), "global.executorKeepAliveSeconds");
-        globalConfig.executorQueueCapacity = parseInteger(globalMap.get("executorQueueCapacity"), "global.executorQueueCapacity");
-        globalConfig.shutdownAwaitSeconds = parseInteger(globalMap.get("shutdownAwaitSeconds"), "global.shutdownAwaitSeconds");
-
-        return globalConfig;
-    }
-
-    private static Integer parseInteger(Object value, String fieldName) {
-        if (value == null) {
-            return null;
-        }
-        if (value instanceof Number) {
-            return ((Number) value).intValue();
-        }
-        if (value instanceof String) {
-            String text = (String) value;
-            try {
-                return Integer.parseInt(text.trim());
-            } catch (NumberFormatException e) {
-                logger.error("Invalid integer value '{}' for {}", value, fieldName);
-                return null;
-            }
-        }
-        logger.error("Invalid value type '{}' for {}. Expected integer.", value.getClass().getName(), fieldName);
-        return null;
-    }
-
-    private static void applyGlobalConfig(ProxyDto proxyDto, GlobalConfig globalConfig) {
-        if (proxyDto.getExecutorCorePoolSize() == 0 && globalConfig.executorCorePoolSize != null) {
-            proxyDto.setExecutorCorePoolSize(globalConfig.executorCorePoolSize);
-        }
-        if (proxyDto.getExecutorMaxPoolSize() == 0 && globalConfig.executorMaxPoolSize != null) {
-            proxyDto.setExecutorMaxPoolSize(globalConfig.executorMaxPoolSize);
-        }
-        if (proxyDto.getExecutorKeepAliveSeconds() == 0 && globalConfig.executorKeepAliveSeconds != null) {
-            proxyDto.setExecutorKeepAliveSeconds(globalConfig.executorKeepAliveSeconds);
-        }
-        if (proxyDto.getExecutorQueueCapacity() == 0 && globalConfig.executorQueueCapacity != null) {
-            proxyDto.setExecutorQueueCapacity(globalConfig.executorQueueCapacity);
-        }
-        if (proxyDto.getShutdownAwaitSeconds() == 0 && globalConfig.shutdownAwaitSeconds != null) {
-            proxyDto.setShutdownAwaitSeconds(globalConfig.shutdownAwaitSeconds);
+    private static boolean initializeGeoIpLocator(GlobalConfig globalConfig) {
+        String configuredPath = normalizeGeoIpDbPath(globalConfig != null ? globalConfig.geoIpDbPath : null);
+        try {
+            inetAddressLocator = new InetAddressLocator(configuredPath);
+            activeGeoIpDbPath = configuredPath;
+            return true;
+        } catch (IOException e) {
+            logger.error("Failed to load GeoIP database: {}", configuredPath, e);
+            return false;
         }
     }
 
-    // 설정 유효성 검사 메서드
-    private static boolean isValidConfig(ProxyDto proxyDto) {
-        if (proxyDto == null) return false;
-        boolean valid = proxyDto.isValid();
-        if (!valid) {
-            logger.error("Proxy configuration validation failed for: {}", proxyDto.getName() != null ? proxyDto.getName() : "Unnamed Proxy");
+    private static void refreshGeoIpLocatorIfNeeded(GlobalConfig globalConfig) {
+        String configuredPath = normalizeGeoIpDbPath(globalConfig != null ? globalConfig.geoIpDbPath : null);
+        if (configuredPath.equals(activeGeoIpDbPath)) {
+            return;
         }
-        return valid;
+
+        try {
+            InetAddressLocator newLocator = new InetAddressLocator(configuredPath);
+            inetAddressLocator = newLocator;
+            activeGeoIpDbPath = configuredPath;
+            logger.info("GeoIP database path updated: {}", configuredPath);
+        } catch (IOException e) {
+            logger.error("Failed to reload GeoIP database from {}. Keeping previous database: {}", configuredPath, activeGeoIpDbPath, e);
+        }
+    }
+
+    private static void applyRuntimeOptions(GlobalConfig globalConfig) {
+        if (globalConfig == null) {
+            hotReloadEnabled = true;
+            configWatchIntervalMillis = 2000L;
+            configReloadDebounceMillis = 500L;
+            return;
+        }
+
+        hotReloadEnabled = globalConfig.hotReloadEnabled != null ? globalConfig.hotReloadEnabled : true;
+
+        if (globalConfig.hotReloadWatchIntervalMillis != null && globalConfig.hotReloadWatchIntervalMillis > 0L) {
+            configWatchIntervalMillis = globalConfig.hotReloadWatchIntervalMillis;
+        } else {
+            configWatchIntervalMillis = 2000L;
+        }
+
+        if (globalConfig.hotReloadDebounceMillis != null && globalConfig.hotReloadDebounceMillis >= 0L) {
+            configReloadDebounceMillis = globalConfig.hotReloadDebounceMillis;
+        } else {
+            configReloadDebounceMillis = 500L;
+        }
+
+        logger.info(
+            "Runtime options applied: hotReloadEnabled={}, hotReloadWatchIntervalMillis={}, hotReloadDebounceMillis={}",
+            hotReloadEnabled, configWatchIntervalMillis, configReloadDebounceMillis
+        );
+    }
+
+    private static String normalizeGeoIpDbPath(String path) {
+        if (path == null || path.trim().isEmpty()) {
+            return DEFAULT_GEO_IP_DB_PATH;
+        }
+        return path.trim();
     }
 }
