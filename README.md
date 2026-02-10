@@ -6,6 +6,7 @@ JmProxyServer는 프록시 프로그램이며, 쉬운 설정, 국가 및 내부�
 
 - `out`은 일반 SOCKS/HTTP CONNECT 프록시가 아니라, 고정 대상(`forwardHost:forwardPort` 또는 `lb`)으로 전달하는 모드입니다.
 - `lb` 설정 시 라운드로빈 + 헬스체크 + 자동 페일오버가 동작합니다.
+- `lbStrategy: ip_hash` 설정 시 같은 클라이언트 IP는 동일한 LB 타깃으로 우선 라우팅됩니다(장애 시 페일오버).
 
 ## Preview
 ![image](https://user-images.githubusercontent.com/13088077/127344946-e0eb0144-2ef5-4c58-bcb7-290e19d95fa2.png)  
@@ -20,6 +21,13 @@ java -jar JmProxyServer.jar
 
 ## 설정 방법
 ```yaml
+global:
+  executorCorePoolSize: 0 # 워커 코어 스레드 수, 0이면 CPU 코어 수
+  executorMaxPoolSize: 0 # 워커 최대 스레드 수, 0이면 코어*2
+  executorKeepAliveSeconds: 60 # 워커 유휴 스레드 유지시간(초)
+  executorQueueCapacity: 500 # 워커 대기 큐 크기
+  shutdownAwaitSeconds: 10 # 종료 시 워커 종료 대기시간(초)
+
 proxy:
   - type: in # in: 인바운드, out: 고정대상 전달형 아웃바운드
     name: example-single # 프록시 이름
@@ -34,6 +42,7 @@ proxy:
   - type: in
     name: example-lb # 로드밸런싱 프록시 이름
     bindPort: 8081 # 클라이언트 접속 포트
+    lbStrategy: ip_hash # round_robin(기본) | ip_hash
     lbHealthCheckIntervalSeconds: 5 # 헬스체크 주기(초)
     healthCheckInitialDelaySeconds: 1 # 서버 시작 후 첫 헬스체크 지연(초)
     healthCheckConnectTimeoutMillis: 2000 # 헬스체크 연결 타임아웃(ms)
@@ -62,6 +71,7 @@ proxy:
 - `ProxyServer`: 설정 로딩/시작
 - `ProxyMain`: 연결 수락/전송 오케스트레이션
 - `ForwardTargetSelector`: 라운드로빈 후보 선택
+- `ForwardTargetSelector`: LB 후보 선택(라운드로빈 / IP 해시)
 - `TargetHealthTracker`: 헬스 상태 전이(임계치 기반)
 - `ConnectionPolicy`: 국가/내부망/루프백 허용 정책
 
@@ -74,6 +84,7 @@ proxy:
 | `forwardHost` | 단건 전달 대상 호스트 (`lb` 미사용 시) | 없음(`lb` 없을 때 필수) |
 | `forwardPort` | 단건 전달 대상 포트 (`lb` 미사용 시) | 없음(`lb` 없을 때 필수) |
 | `lb` | 로드밸런싱 대상 배열 (`name`, `forwardHost`, `forwardPort`) | 미사용 |
+| `lbStrategy` | LB 선택 전략 (`round_robin`, `ip_hash`) | `round_robin` |
 | `allowedCountries` | 허용 원본 (`Any`, 국가코드, `private`, `localhost`) | `in`: 빈값이면 전부 차단, `out`: 빈값이면 전부 허용 |
 | `lbHealthCheckIntervalSeconds` | LB 헬스체크 주기(초) | `10` |
 | `healthCheckInitialDelaySeconds` | 시작 후 첫 헬스체크 지연(초) | `1` |
@@ -84,8 +95,8 @@ proxy:
 | `clientSoTimeoutMillis` | 클라이언트 소켓 read 타임아웃(ms), `0`은 무제한 | `0` |
 | `forwardSoTimeoutMillis` | 타깃 소켓 read 타임아웃(ms), `0`은 무제한 | `0` |
 | `transferTimeoutSeconds` | 전체 전송 최대시간(초), `0`은 무제한 | `0` |
-| `executorCorePoolSize` | 워커 코어 스레드 수 | `CPU 코어 수` |
-| `executorMaxPoolSize` | 워커 최대 스레드 수 | `core*2` |
-| `executorKeepAliveSeconds` | 워커 유휴 스레드 유지시간(초) | `60` |
-| `executorQueueCapacity` | 워커 대기 큐 크기 | `500` |
-| `shutdownAwaitSeconds` | 종료 시 워커 종료 대기시간(초) | `10` |
+| `global.executorCorePoolSize` | 전역 워커 코어 스레드 수 | `CPU 코어 수` |
+| `global.executorMaxPoolSize` | 전역 워커 최대 스레드 수 | `core*2` |
+| `global.executorKeepAliveSeconds` | 전역 워커 유휴 스레드 유지시간(초) | `60` |
+| `global.executorQueueCapacity` | 전역 워커 대기 큐 크기 | `500` |
+| `global.shutdownAwaitSeconds` | 전역 종료 시 워커 종료 대기시간(초) | `10` |

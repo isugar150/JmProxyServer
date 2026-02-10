@@ -5,6 +5,9 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class ForwardTargetSelector {
+    public static final String STRATEGY_ROUND_ROBIN = "round_robin";
+    public static final String STRATEGY_IP_HASH = "ip_hash";
+
     private final List<ForwardTarget> targets;
     private final AtomicInteger index = new AtomicInteger(0);
 
@@ -12,13 +15,13 @@ public class ForwardTargetSelector {
         this.targets = targets;
     }
 
-    public List<ForwardTarget> selectCandidates(TargetHealthTracker healthTracker) {
+    public List<ForwardTarget> selectCandidates(TargetHealthTracker healthTracker, String lbStrategy, String clientIp) {
         if (targets.isEmpty()) {
             return List.of();
         }
 
         int size = targets.size();
-        int startIndex = Math.floorMod(index.getAndIncrement(), size);
+        int startIndex = resolveStartIndex(size, lbStrategy, clientIp);
 
         List<ForwardTarget> healthyTargets = new ArrayList<>();
         List<ForwardTarget> unhealthyTargets = new ArrayList<>();
@@ -38,5 +41,12 @@ public class ForwardTargetSelector {
             return healthyTargets;
         }
         return unhealthyTargets;
+    }
+
+    private int resolveStartIndex(int size, String lbStrategy, String clientIp) {
+        if (STRATEGY_IP_HASH.equalsIgnoreCase(lbStrategy) && clientIp != null && !clientIp.isEmpty()) {
+            return Math.floorMod(clientIp.hashCode(), size);
+        }
+        return Math.floorMod(index.getAndIncrement(), size);
     }
 }

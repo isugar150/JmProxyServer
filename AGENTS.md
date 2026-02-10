@@ -4,13 +4,13 @@
 - `src/com/namejm/proxy`: core Java source.
   - `ProxyServer`: app entry point and YAML loading.
   - `ProxyMain`: runtime orchestration (accept loop, forwarding, scheduler).
-  - `ForwardTarget`, `ForwardTargetSelector`: target model and round-robin candidate selection.
+  - `ForwardTarget`, `ForwardTargetSelector`: target model and LB candidate selection (`round_robin`, `ip_hash`).
   - `TargetHealthTracker`: health state transitions with fail/success thresholds.
   - `ConnectionPolicy`: allow/deny policy (`any`, `private`, `localhost`, country code).
   - `ProxyDto`: configuration schema and validation.
 - `src/META-INF/MANIFEST.MF`: JAR entry point metadata (`Main-Class: com.namejm.proxy.ProxyServer`).
 - `resources/logback.xml`: logging configuration bundled on classpath.
-- `config/application.yml`: runtime proxy rules; `config/GeoLite2-Country.mmdb`: GeoIP database.
+- `config/application.yml`: runtime proxy rules (`proxy` + optional `global`); `config/GeoLite2-Country.mmdb`: GeoIP database.
 - `lib/*.jar`: third-party dependencies (SnakeYAML, SLF4J, Logback, GeoIP2).
 - `bin/startup.bat` and `bin/startup.sh`: production-style launch scripts for `JmProxyServer.jar`.
 
@@ -53,6 +53,7 @@ java -jar JmProxyServer.jar .\config\application.yml
 - Recent history uses short, imperative messages (often Korean), e.g., `로직 개선`, `Update ProxyDto.java`.
 - Prefer concise subject lines under 72 chars; include scope when useful (example: `proxy: improve private IP filtering`).
 - PRs should include: what changed, why, local verification steps, and config/runtime impact (ports, LB options, timeout values, GeoIP DB path).
+- When changing configuration behavior, update both `README.md` and the commented sample in `config/application.yml` in the same PR.
 - Link related issues and attach log snippets when behavior or access control output changes.
 
 ## Security & Configuration Tips

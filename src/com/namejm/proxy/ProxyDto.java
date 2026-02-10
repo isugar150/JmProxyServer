@@ -13,6 +13,7 @@ import java.util.stream.Collectors;
 public class ProxyDto {
     private static final Logger logger = LoggerFactory.getLogger(ProxyDto.class);
     private static final Set<String> VALID_TYPES = new HashSet<>(Arrays.asList("in", "out"));
+    private static final Set<String> VALID_LB_STRATEGIES = new HashSet<>(Arrays.asList("round_robin", "ip_hash"));
 
     private String type;
     private String name;
@@ -35,6 +36,7 @@ public class ProxyDto {
     private int shutdownAwaitSeconds;
     private int healthFailThreshold;
     private int healthSuccessThreshold;
+    private String lbStrategy;
 
     public static class LbTarget {
         private String name;
@@ -119,6 +121,8 @@ public class ProxyDto {
     public void setHealthFailThreshold(int healthFailThreshold) { this.healthFailThreshold = healthFailThreshold; }
     public int getHealthSuccessThreshold() { return healthSuccessThreshold; }
     public void setHealthSuccessThreshold(int healthSuccessThreshold) { this.healthSuccessThreshold = healthSuccessThreshold; }
+    public String getLbStrategy() { return lbStrategy; }
+    public void setLbStrategy(String lbStrategy) { this.lbStrategy = lbStrategy; }
 
     public boolean isInbound() {
         return "in".equalsIgnoreCase(type);
@@ -191,6 +195,13 @@ public class ProxyDto {
         return healthSuccessThreshold > 0 ? healthSuccessThreshold : 2;
     }
 
+    public String getLbStrategyOrDefault() {
+        if (lbStrategy == null || lbStrategy.trim().isEmpty()) {
+            return "round_robin";
+        }
+        return lbStrategy.trim().toLowerCase();
+    }
+
     @Override
     public String toString() {
         return "ProxyDto{" +
@@ -214,6 +225,7 @@ public class ProxyDto {
                ", shutdownAwaitSeconds=" + shutdownAwaitSeconds +
                ", healthFailThreshold=" + healthFailThreshold +
                ", healthSuccessThreshold=" + healthSuccessThreshold +
+               ", lbStrategy='" + lbStrategy + '\'' +
                ", lb=" + lb +
                '}';
     }
@@ -290,6 +302,11 @@ public class ProxyDto {
         }
         if (healthSuccessThreshold < 0) {
             logger.error("Invalid healthSuccessThreshold '{}' for proxy '{}'. Must be 0 or greater.", healthSuccessThreshold, name);
+            valid = false;
+        }
+        String normalizedLbStrategy = getLbStrategyOrDefault();
+        if (!VALID_LB_STRATEGIES.contains(normalizedLbStrategy)) {
+            logger.error("Invalid lbStrategy '{}' for proxy '{}'. Supported values: round_robin, ip_hash.", lbStrategy, name);
             valid = false;
         }
         if (hasLbTargets()) {

@@ -107,7 +107,7 @@ public class ProxyMain {
                 return;
             }
 
-            upstreamSocket = createServerConnection();
+            upstreamSocket = createServerConnection(clientSocket);
             transferData(clientSocket, upstreamSocket);
         } catch (Exception e) {
             logger.error("Connection processing error", e);
@@ -117,8 +117,10 @@ public class ProxyMain {
         }
     }
 
-    private Socket createServerConnection() throws IOException {
-        List<ForwardTarget> candidates = targetSelector.selectCandidates(healthTracker);
+    private Socket createServerConnection(Socket clientSocket) throws IOException {
+        String clientIp = clientSocket.getInetAddress() != null ? clientSocket.getInetAddress().getHostAddress() : "";
+        String lbStrategy = config.getLbStrategyOrDefault();
+        List<ForwardTarget> candidates = targetSelector.selectCandidates(healthTracker, lbStrategy, clientIp);
         IOException lastException = null;
 
         for (ForwardTarget target : candidates) {

@@ -15,6 +15,14 @@ public class ProxyServer {
     private static List<ProxyDto> config = null;
     private static InetAddressLocator inetAddressLocator;
     private static final List<ProxyMain> proxyInstances = new ArrayList<>();
+
+    private static class GlobalConfig {
+        private Integer executorCorePoolSize;
+        private Integer executorMaxPoolSize;
+        private Integer executorKeepAliveSeconds;
+        private Integer executorQueueCapacity;
+        private Integer shutdownAwaitSeconds;
+    }
     public static void main(String args[]){
         System.out.println("       _           _____                      _____                          \n" +
                 "      | |         |  __ \\                    / ____|                         \n" +
@@ -130,6 +138,7 @@ public class ProxyServer {
     private static List<ProxyDto> parseProxyConfig(Map<String, Object> rawConfig) {
         List<ProxyDto> proxyList = new ArrayList<>();
         Object proxyObj = rawConfig.get("proxy");
+        GlobalConfig globalConfig = parseGlobalConfig(rawConfig);
 
         if (!(proxyObj instanceof List)) {
             logger.error("'proxy' configuration should be a list.");
@@ -150,7 +159,8 @@ public class ProxyServer {
                 ProxyDto proxyDto = dtoYaml.load(mapYaml.dump(item));
 
                 if (proxyDto != null) {
-                     proxyList.add(proxyDto);
+                    applyGlobalConfig(proxyDto, globalConfig);
+                    proxyList.add(proxyDto);
                 } else {
                      logger.warn("Failed to parse proxy configuration at index {}, skipping.", i);
                 }
@@ -159,6 +169,61 @@ public class ProxyServer {
             }
         }
         return proxyList;
+    }
+
+    private static GlobalConfig parseGlobalConfig(Map<String, Object> rawConfig) {
+        GlobalConfig globalConfig = new GlobalConfig();
+        Object globalObj = rawConfig.get("global");
+        if (!(globalObj instanceof Map)) {
+            return globalConfig;
+        }
+        Map<?, ?> globalMap = (Map<?, ?>) globalObj;
+
+        globalConfig.executorCorePoolSize = parseInteger(globalMap.get("executorCorePoolSize"), "global.executorCorePoolSize");
+        globalConfig.executorMaxPoolSize = parseInteger(globalMap.get("executorMaxPoolSize"), "global.executorMaxPoolSize");
+        globalConfig.executorKeepAliveSeconds = parseInteger(globalMap.get("executorKeepAliveSeconds"), "global.executorKeepAliveSeconds");
+        globalConfig.executorQueueCapacity = parseInteger(globalMap.get("executorQueueCapacity"), "global.executorQueueCapacity");
+        globalConfig.shutdownAwaitSeconds = parseInteger(globalMap.get("shutdownAwaitSeconds"), "global.shutdownAwaitSeconds");
+
+        return globalConfig;
+    }
+
+    private static Integer parseInteger(Object value, String fieldName) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        if (value instanceof String) {
+            String text = (String) value;
+            try {
+                return Integer.parseInt(text.trim());
+            } catch (NumberFormatException e) {
+                logger.error("Invalid integer value '{}' for {}", value, fieldName);
+                return null;
+            }
+        }
+        logger.error("Invalid value type '{}' for {}. Expected integer.", value.getClass().getName(), fieldName);
+        return null;
+    }
+
+    private static void applyGlobalConfig(ProxyDto proxyDto, GlobalConfig globalConfig) {
+        if (proxyDto.getExecutorCorePoolSize() == 0 && globalConfig.executorCorePoolSize != null) {
+            proxyDto.setExecutorCorePoolSize(globalConfig.executorCorePoolSize);
+        }
+        if (proxyDto.getExecutorMaxPoolSize() == 0 && globalConfig.executorMaxPoolSize != null) {
+            proxyDto.setExecutorMaxPoolSize(globalConfig.executorMaxPoolSize);
+        }
+        if (proxyDto.getExecutorKeepAliveSeconds() == 0 && globalConfig.executorKeepAliveSeconds != null) {
+            proxyDto.setExecutorKeepAliveSeconds(globalConfig.executorKeepAliveSeconds);
+        }
+        if (proxyDto.getExecutorQueueCapacity() == 0 && globalConfig.executorQueueCapacity != null) {
+            proxyDto.setExecutorQueueCapacity(globalConfig.executorQueueCapacity);
+        }
+        if (proxyDto.getShutdownAwaitSeconds() == 0 && globalConfig.shutdownAwaitSeconds != null) {
+            proxyDto.setShutdownAwaitSeconds(globalConfig.shutdownAwaitSeconds);
+        }
     }
 
     // 설정 유효성 검사 메서드
