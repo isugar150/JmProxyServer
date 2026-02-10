@@ -35,6 +35,8 @@ import static ch.qos.logback.core.util.CloseUtil.closeQuietly;
 public class ProxyMain {
     private static final Logger logger = LoggerFactory.getLogger(ProxyMain.class);
     private static final int RELAY_BUFFER_SIZE = 16 * 1024;
+    private static final int WARM_POOL_REFILL_INTERVAL_MS = 500;
+    private static final int WARM_POOL_REFILL_BATCH_PER_TARGET = 2;
 
     private final ProxyDto config;
     private final ExecutorService executorService;
@@ -52,6 +54,7 @@ public class ProxyMain {
     private final ConcurrentHashMap<String, BlockingQueue<Socket>> warmUpstreamPools;
     private final ScheduledExecutorService warmPoolScheduler;
     private final int warmPoolTargetSizePerTarget;
+    private final int acceptBacklog;
 
     private ScheduledExecutorService healthCheckExecutor;
     private ExecutorService healthCheckProbeExecutor;
@@ -76,6 +79,7 @@ public class ProxyMain {
         int corePoolSize = config.getExecutorCorePoolSizeOrDefault();
         int maxPoolSize = config.getExecutorMaxPoolSizeOrDefault(corePoolSize);
         long keepAliveTime = config.getExecutorKeepAliveSecondsOrDefault();
+        this.acceptBacklog = Math.max(256, Math.min(16384, config.getMaxActiveRelaysOrDefault() * 2));
         LinkedBlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<>(config.getExecutorQueueCapacityOrDefault());
         RejectedExecutionHandler rejectionHandler = new ThreadPoolExecutor.AbortPolicy();
 
@@ -182,9 +186,10 @@ public class ProxyMain {
         try {
             serverSocket = new ServerSocket();
             serverSocket.setReuseAddress(true);
-            serverSocket.bind(new InetSocketAddress(config.getBindPort()));
+            serverSocket.bind(new InetSocketAddress(config.getBindPort()), acceptBacklog);
 
             logger.info("Proxy server started on port {}", config.getBindPort());
+            logger.info("{} - Accept backlog configured: {}", config.getName(), acceptBacklog);
             logger.info("{} - JDK Selector provider: {}", config.getName(), SelectorProvider.provider().getClass().getName());
             if (transferExecutor instanceof ThreadPoolExecutor) {
                 ThreadPoolExecutor tpe = (ThreadPoolExecutor) transferExecutor;
@@ -287,29 +292,40 @@ public class ProxyMain {
         String lbStrategy = config.getLbStrategyOrDefault();
         List<ForwardTarget> candidates = targetSelector.selectCandidates(healthTracker, lbStrategy, clientIp);
         IOException lastException = null;
+        int maxConnectAttemptsPerTarget = candidates.size() <= 1 ? 4 : 2;
 
         for (ForwardTarget target : candidates) {
-            try {
-                Socket warm = borrowWarmUpstream(target);
-                if (warm != null) {
-                    healthTracker.markReachable(target);
-                    logger.debug("{} - Warm pooled target selected: {} ({}:{})",
-                        config.getName(), target.getName(), target.getHost(), target.getPort());
-                    return warm;
-                }
+            for (int attempt = 1; attempt <= maxConnectAttemptsPerTarget; attempt++) {
+                try {
+                    Socket warm = borrowWarmUpstream(target);
+                    if (warm != null) {
+                        healthTracker.markReachable(target);
+                        logger.debug("{} - Warm pooled target selected: {} ({}:{})",
+                            config.getName(), target.getName(), target.getHost(), target.getPort());
+                        return warm;
+                    }
 
-                Socket upstreamSocket = connectToTarget(target, config.getForwardConnectTimeoutMillisOrDefault());
-                healthTracker.markReachable(target);
-                logger.debug("{} - Forward target selected: {} ({}:{})",
-                    config.getName(), target.getName(), target.getHost(), target.getPort());
-                return upstreamSocket;
-            } catch (IOException e) {
-                healthTracker.markUnreachable(target);
-                lastException = e;
-                if (shouldLogWarn("target-failed:" + target.key(), 2000L)) {
-                    logger.warn("{} - Forward target failed: {} ({}:{})",
+                    Socket upstreamSocket = connectToTarget(target, config.getForwardConnectTimeoutMillisOrDefault());
+                    healthTracker.markReachable(target);
+                    logger.debug("{} - Forward target selected: {} ({}:{})",
                         config.getName(), target.getName(), target.getHost(), target.getPort());
+                    return upstreamSocket;
+                } catch (IOException e) {
+                    lastException = e;
+                    if (attempt < maxConnectAttemptsPerTarget) {
+                        try {
+                            Thread.sleep(Math.min(10L * attempt, 30L));
+                        } catch (InterruptedException interruptedException) {
+                            Thread.currentThread().interrupt();
+                            throw new IOException("Interrupted while retrying upstream connection", interruptedException);
+                        }
+                    }
                 }
+            }
+            healthTracker.markUnreachable(target);
+            if (shouldLogWarn("target-failed:" + target.key(), 2000L)) {
+                logger.warn("{} - Forward target failed: {} ({}:{})",
+                    config.getName(), target.getName(), target.getHost(), target.getPort());
             }
         }
 
@@ -412,7 +428,7 @@ public class ProxyMain {
         if (warmPoolScheduler == null || warmPoolTargetSizePerTarget <= 0 || forwardTargets.isEmpty()) {
             return;
         }
-        warmPoolScheduler.scheduleWithFixedDelay(this::fillWarmUpstreamPool, 0, 200, TimeUnit.MILLISECONDS);
+        warmPoolScheduler.scheduleWithFixedDelay(this::fillWarmUpstreamPool, 0, WARM_POOL_REFILL_INTERVAL_MS, TimeUnit.MILLISECONDS);
         logger.info("{} - Warm upstream pool enabled. perTargetSize={}, targets={}",
             config.getName(), warmPoolTargetSizePerTarget, forwardTargets.size());
     }
@@ -427,7 +443,12 @@ public class ProxyMain {
             if (queue == null) {
                 continue;
             }
-            while (isRunning && queue.size() < warmPoolTargetSizePerTarget) {
+            int deficit = warmPoolTargetSizePerTarget - queue.size();
+            if (deficit <= 0) {
+                continue;
+            }
+            int toFill = Math.min(deficit, WARM_POOL_REFILL_BATCH_PER_TARGET);
+            for (int i = 0; isRunning && i < toFill; i++) {
                 try {
                     Socket socket = connectToTarget(target, config.getForwardConnectTimeoutMillisOrDefault());
                     healthTracker.markReachable(target);
@@ -436,7 +457,6 @@ public class ProxyMain {
                         break;
                     }
                 } catch (Exception e) {
-                    healthTracker.markUnreachable(target);
                     if (shouldLogWarn("warm-fill-failed:" + target.key(), 3000L)) {
                         logger.warn("{} - Warm pool fill failed for target {} ({}:{})",
                             config.getName(), target.getName(), target.getHost(), target.getPort());

@@ -1,0 +1,20 @@
+global:
+  hotReloadEnabled: false
+  geoIpDbPath: config/GeoLite2-Country.mmdb
+
+proxy:
+  - type: in
+    name: load-proxy
+    bindPort: 19310
+    forwardHost: localhost
+    forwardPort: 19320
+    allowedCountries: [any]
+    transferTimeoutSeconds: 0
+    halfCloseLingerSeconds: 30
+    maxActiveRelays: 2000
+    executorCorePoolSize: 32
+    executorMaxPoolSize: 128
+    executorQueueCapacity: 4000
+    forwardConnectTimeoutMillis: 3000
+    clientSoTimeoutMillis: 0
+    forwardSoTimeoutMillis: 0

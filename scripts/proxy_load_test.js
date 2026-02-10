@@ -14,6 +14,8 @@ const START_BACKEND = (process.env.START_BACKEND || "true").toLowerCase() !== "f
 const BACKEND_MODE = (process.env.BACKEND_MODE || "echo").toLowerCase();
 const BACKEND_DELAY_MS = Number(process.env.BACKEND_DELAY_MS || 0);
 const TEST_TIMEOUT_MS = Number(process.env.TEST_TIMEOUT_MS || 120000);
+const CONNECT_RETRY_COUNT = Number(process.env.CONNECT_RETRY_COUNT || 8);
+const CONNECT_RETRY_DELAY_MS = Number(process.env.CONNECT_RETRY_DELAY_MS || 10);
 
 function nowMs() {
   return Date.now();
@@ -81,6 +83,33 @@ function connectSocket(port, timeoutMs) {
   });
 }
 
+function isTransientConnectError(err) {
+  if (!err || !err.code) return false;
+  return (
+    err.code === "EADDRINUSE" ||
+    err.code === "EADDRNOTAVAIL" ||
+    err.code === "ECONNREFUSED" ||
+    err.code === "ECONNRESET"
+  );
+}
+
+async function connectSocketWithRetry(port, timeoutMs) {
+  let lastErr = null;
+  const attempts = Math.max(1, CONNECT_RETRY_COUNT);
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await connectSocket(port, timeoutMs);
+    } catch (err) {
+      lastErr = err;
+      if (!isTransientConnectError(err) || i === attempts - 1) {
+        throw err;
+      }
+      await sleep(Math.max(0, CONNECT_RETRY_DELAY_MS));
+    }
+  }
+  throw lastErr || new Error("connect failed");
+}
+
 async function waitForProxyOpen(port, timeoutMs) {
   const start = nowMs();
   while (nowMs() - start < timeoutMs) {
@@ -97,7 +126,7 @@ async function waitForProxyOpen(port, timeoutMs) {
 
 async function runSingleRequest() {
   const t0 = nowMs();
-  const socket = await connectSocket(PROXY_PORT, CONNECT_TIMEOUT_MS);
+  const socket = await connectSocketWithRetry(PROXY_PORT, CONNECT_TIMEOUT_MS);
   socket.setTimeout(IO_TIMEOUT_MS);
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -160,6 +189,7 @@ async function runLoad() {
   let ok = 0;
   let fail = 0;
   const latencies = [];
+  const failReasons = new Map();
 
   return new Promise((resolve, reject) => {
     const testTimer = setTimeout(() => {
@@ -175,15 +205,17 @@ async function runLoad() {
             ok++;
             latencies.push(lat);
           })
-          .catch(() => {
+          .catch((err) => {
             fail++;
+            const reason = err && err.message ? err.message : "unknown";
+            failReasons.set(reason, (failReasons.get(reason) || 0) + 1);
           })
           .finally(() => {
             inFlight--;
             done++;
             if (done >= TOTAL_REQUESTS) {
               clearTimeout(testTimer);
-              resolve({ ok, fail, latencies });
+              resolve({ ok, fail, latencies, failReasons });
             } else {
               pump();
             }
@@ -207,6 +239,10 @@ async function main() {
     const elapsedMs = nowMs() - start;
     const rps = (result.ok / Math.max(1, elapsedMs)) * 1000;
     const sorted = result.latencies.slice().sort((a, b) => a - b);
+    const avgLatency =
+      result.latencies.length > 0
+        ? result.latencies.reduce((sum, v) => sum + v, 0) / result.latencies.length
+        : 0;
 
     const p50 = percentile(sorted, 50);
     const p95 = percentile(sorted, 95);
@@ -223,9 +259,17 @@ async function main() {
     console.log(`success_rate=${successRate.toFixed(2)}%`);
     console.log(`elapsed_ms=${elapsedMs}`);
     console.log(`rps=${rps.toFixed(2)}`);
+    console.log(`avg_latency_ms=${avgLatency.toFixed(2)}`);
     console.log(`latency_p50_ms=${p50}`);
     console.log(`latency_p95_ms=${p95}`);
     console.log(`latency_p99_ms=${p99}`);
+    if (result.failReasons && result.failReasons.size > 0) {
+      console.log("fail_reasons");
+      const entries = Array.from(result.failReasons.entries()).sort((a, b) => b[1] - a[1]);
+      for (const [reason, count] of entries) {
+        console.log(`- ${reason}: ${count}`);
+      }
+    }
 
     if (result.fail > 0) {
       process.exitCode = 1;

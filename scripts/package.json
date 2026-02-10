@@ -7,6 +7,7 @@
     "test:e2e": "node proxy_e2e_test.js",
     "test:e2e:client": "node proxy_client_e2e.js",
     "test:load": "node proxy_load_test.js",
-    "test:load:slow": "node proxy_load_test_slow.js"
+    "test:load:slow": "node proxy_load_test_slow.js",
+    "test:load:persistent": "node proxy_load_test_persistent.js"
   }
 }

@@ -46,9 +46,36 @@ node scripts/proxy_load_test.js
 node scripts/proxy_load_test_slow.js
 ```
 
+부하 테스트(장수 커넥션, DB 유사 시나리오):
+```bash
+node scripts/proxy_load_test_persistent.js
+```
+
 검증 항목:
 - 프록시 기본 릴레이 동작
 - `maxActiveRelays` 초과 시 신규 연결 제한 동작
+
+## 성능 측정 가이드
+- `proxy_load_test.js`는 요청마다 새 TCP 연결을 생성하는 단명 커넥션 부하입니다.
+- `proxy_load_test_persistent.js`는 연결을 유지하며 여러 요청을 보내는 장수 커넥션 부하입니다.
+- 출력 지표:
+  - `rps`: 초당 성공 처리 수
+  - `avg_latency_ms`: 평균 응답시간(ms)
+  - `latency_p50/p95/p99_ms`: 분위 지연시간
+  - `success_rate`: 성공률
+- 주의:
+  - 단명 커넥션에서 동시성이 과도하면 클라이언트 머신의 ephemeral port 한계(`EADDRINUSE`)로 실패율이 왜곡될 수 있습니다.
+  - 스크립트는 `fail > 0`이면 종료코드 `1`을 반환합니다.
+
+### 최근 측정 예시 (로컬)
+- 단명 커넥션 (`TOTAL_REQUESTS=5000`, `CONCURRENCY=100`)
+  - `success_rate=99.98%`
+  - `rps=1780.27`
+  - `avg_latency_ms=56.00`
+- 장수 커넥션 (`CONNECTIONS=300`, `REQUESTS_PER_CONNECTION=20`)
+  - `success_rate=100.00%`
+  - `rps=9273.57`
+  - `avg_latency_ms=20.36`
 
 ## 설정 방법
 ```yaml
