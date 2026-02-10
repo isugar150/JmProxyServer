@@ -2,3 +2,4 @@ out
 JmProxyServer.iml
 .idea
 .node_modules
+*.log
