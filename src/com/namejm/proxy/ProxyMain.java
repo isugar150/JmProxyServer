@@ -1,48 +1,61 @@
 package com.namejm.proxy;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
-import java.util.Locale;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.RejectedExecutionHandler;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import static ch.qos.logback.core.util.CloseUtil.closeQuietly;
 
 public class ProxyMain {
     private static final Logger logger = LoggerFactory.getLogger(ProxyMain.class);
 
-    private ProxyDto config = null;
-    private final InetAddressLocator inetAddressLocator;
-    private ExecutorService executorService;
+    private final ProxyDto config;
+    private final ExecutorService executorService;
+    private final ConnectionPolicy connectionPolicy;
+    private final List<ForwardTarget> forwardTargets;
+    private final ForwardTargetSelector targetSelector;
+    private final TargetHealthTracker healthTracker;
+
+    private ScheduledExecutorService healthCheckExecutor;
     private ServerSocket serverSocket;
     private volatile boolean isRunning = true;
 
     public ProxyMain(ProxyDto config, InetAddressLocator inetAddressLocator) {
         this.config = config;
-        this.inetAddressLocator = inetAddressLocator;
-    }
+        this.connectionPolicy = new ConnectionPolicy(config, inetAddressLocator);
+        this.forwardTargets = ForwardTarget.fromConfig(config);
+        this.targetSelector = new ForwardTargetSelector(forwardTargets);
+        this.healthTracker = new TargetHealthTracker(
+            forwardTargets,
+            config.getHealthFailThresholdOrDefault(),
+            config.getHealthSuccessThresholdOrDefault(),
+            logger,
+            config.getName()
+        );
 
-    public void start() throws IOException {
-        // 스레드 풀 설정
-        int corePoolSize = Runtime.getRuntime().availableProcessors();
-        int maxPoolSize = corePoolSize * 2;
-        long keepAliveTime = 60L;
+        int corePoolSize = config.getExecutorCorePoolSizeOrDefault();
+        int maxPoolSize = config.getExecutorMaxPoolSizeOrDefault(corePoolSize);
+        long keepAliveTime = config.getExecutorKeepAliveSecondsOrDefault();
+        LinkedBlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<>(config.getExecutorQueueCapacityOrDefault());
+        RejectedExecutionHandler rejectionHandler = new ThreadPoolExecutor.AbortPolicy();
 
-        // 대기 큐와 거부 핸들러
-        LinkedBlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<>(500);
-        RejectedExecutionHandler rejectionHandler = new ThreadPoolExecutor.CallerRunsPolicy();
-
-        executorService = new ThreadPoolExecutor(
+        this.executorService = new ThreadPoolExecutor(
             corePoolSize,
             maxPoolSize,
             keepAliveTime,
@@ -50,14 +63,16 @@ public class ProxyMain {
             workQueue,
             rejectionHandler
         );
+    }
 
+    public void start() throws IOException {
         serverSocket = new ServerSocket(config.getBindPort());
         serverSocket.setReuseAddress(true);
 
-        logger.info("Proxy server started on port {} with thread pool: core={}, max={}",
-            config.getBindPort(), corePoolSize, maxPoolSize);
+        logger.info("Proxy server started on port {}", config.getBindPort());
 
-        // 연결 수락 스레드
+        startHealthCheckScheduler();
+
         Thread acceptThread = new Thread(this::acceptConnections);
         acceptThread.setName("ProxyAcceptThread-" + config.getBindPort());
         acceptThread.start();
@@ -66,13 +81,15 @@ public class ProxyMain {
     private void acceptConnections() {
         while (isRunning && !Thread.currentThread().isInterrupted()) {
             try {
-                // 연결 수락
                 Socket clientSocket = serverSocket.accept();
+                clientSocket.setSoTimeout(config.getClientSoTimeoutMillisOrDefault());
 
-                // 타임아웃 설정
-                clientSocket.setSoTimeout(30000);
-
-                executorService.submit(() -> handleConnection(clientSocket));
+                try {
+                    executorService.submit(() -> handleConnection(clientSocket));
+                } catch (RejectedExecutionException e) {
+                    logger.warn("{} - Connection rejected: worker queue is full. Closing client socket.", config.getName());
+                    closeQuietly(clientSocket);
+                }
             } catch (IOException e) {
                 if (isRunning) {
                     logger.error("Error accepting connection", e);
@@ -82,70 +99,107 @@ public class ProxyMain {
     }
 
     private void handleConnection(Socket clientSocket) {
-        Socket serverSocket = null;
-        boolean connectionAllowed = false;
-
+        Socket upstreamSocket = null;
         try {
-            // 연결 허용 체크
-            connectionAllowed = isAllowedConnection(clientSocket);
-
+            boolean connectionAllowed = connectionPolicy.isAllowed(clientSocket);
             logConnection(clientSocket, connectionAllowed);
-
             if (!connectionAllowed) {
                 return;
             }
-            serverSocket = createServerConnection();
 
-            transferData(clientSocket, serverSocket);
-
+            upstreamSocket = createServerConnection();
+            transferData(clientSocket, upstreamSocket);
         } catch (Exception e) {
             logger.error("Connection processing error", e);
         } finally {
             closeQuietly(clientSocket);
-            closeQuietly(serverSocket);
+            closeQuietly(upstreamSocket);
         }
     }
 
     private Socket createServerConnection() throws IOException {
-        Socket serverSocket = new Socket(
-            config.getForwardHost(),
-            config.getForwardPort()
+        List<ForwardTarget> candidates = targetSelector.selectCandidates(healthTracker);
+        IOException lastException = null;
+
+        for (ForwardTarget target : candidates) {
+            try {
+                Socket upstreamSocket = connectToTarget(target, config.getForwardConnectTimeoutMillisOrDefault());
+                healthTracker.markReachable(target);
+                logger.info("{} - Forward target selected: {} ({}:{})",
+                    config.getName(), target.getName(), target.getHost(), target.getPort());
+                return upstreamSocket;
+            } catch (IOException e) {
+                healthTracker.markUnreachable(target);
+                lastException = e;
+                logger.warn("{} - Forward target failed: {} ({}:{})",
+                    config.getName(), target.getName(), target.getHost(), target.getPort());
+            }
+        }
+
+        throw new IOException("No available forward target for proxy " + config.getName(), lastException);
+    }
+
+    private void startHealthCheckScheduler() {
+        int intervalSeconds = config.getLbHealthCheckIntervalSecondsOrDefault();
+        healthCheckExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r);
+            thread.setName("ProxyHealthCheck-" + config.getName());
+            thread.setDaemon(true);
+            return thread;
+        });
+        healthCheckExecutor.scheduleAtFixedRate(
+            this::runHealthChecks,
+            config.getHealthCheckInitialDelaySecondsOrDefault(),
+            intervalSeconds,
+            TimeUnit.SECONDS
         );
+        logger.info("{} - Health check scheduler started (interval: {}s)", config.getName(), intervalSeconds);
+    }
 
-        serverSocket.setSoTimeout(30000);
+    private void runHealthChecks() {
+        if (!isRunning) {
+            return;
+        }
 
-        return serverSocket;
+        for (ForwardTarget target : forwardTargets) {
+            try {
+                Socket socket = connectToTarget(target, config.getHealthCheckConnectTimeoutMillisOrDefault());
+                closeQuietly(socket);
+                healthTracker.markReachable(target);
+            } catch (IOException e) {
+                healthTracker.markUnreachable(target);
+            }
+        }
+    }
+
+    private Socket connectToTarget(ForwardTarget target, int connectTimeoutMillis) throws IOException {
+        Socket socket = new Socket();
+        socket.connect(new InetSocketAddress(target.getHost(), target.getPort()), connectTimeoutMillis);
+        socket.setSoTimeout(config.getForwardSoTimeoutMillisOrDefault());
+        return socket;
     }
 
     private void logConnection(Socket clientSocket, boolean allowed) {
         try {
             String remoteAddr = clientSocket.getInetAddress().getHostAddress();
             int remotePort = clientSocket.getPort();
-            String country = "UNKNOWN";
+            String country = connectionPolicy.resolveCountryCode(remoteAddr);
 
-            try {
-                Locale locale = inetAddressLocator.getLocale(remoteAddr);
-                country = locale.getCountry();
-
-            } catch (Exception e) {
-                 logger.warn("Failed to get country for IP {} during logging", remoteAddr, e);
-            }
-
-            if("UNKNOWN".equals(country)) {
-                 logger.info("{} - Connection {} - IP: {}, Port: {}",
-                     config.getName(),
-                     allowed ? "ALLOWED" : "BLOCKED",
-                     remoteAddr,
-                     remotePort
-                 );
+            if ("UNKNOWN".equals(country)) {
+                logger.info("{} - Connection {} - IP: {}, Port: {}",
+                    config.getName(),
+                    allowed ? "ALLOWED" : "BLOCKED",
+                    remoteAddr,
+                    remotePort
+                );
             } else {
-                 logger.info("{} - Connection {} - IP: {}, Port: {}, Country: {}",
-                     config.getName(),
-                     allowed ? "ALLOWED" : "BLOCKED",
-                     remoteAddr,
-                     remotePort,
-                     country
-                 );
+                logger.info("{} - Connection {} - IP: {}, Port: {}, Country: {}",
+                    config.getName(),
+                    allowed ? "ALLOWED" : "BLOCKED",
+                    remoteAddr,
+                    remotePort,
+                    country
+                );
             }
         } catch (Exception e) {
             logger.warn("Connection logging error", e);
@@ -153,7 +207,6 @@ public class ProxyMain {
     }
 
     private void transferData(Socket clientSocket, Socket serverSocket) throws Exception {
-        // 데이터 전송 스레드 생성
         Thread clientToServerThread = createDataTransferThread(
             clientSocket.getInputStream(),
             serverSocket.getOutputStream(),
@@ -166,89 +219,38 @@ public class ProxyMain {
             "Server-to-Client"
         );
 
-        // 스레드 시작
         clientToServerThread.start();
         serverToClientThread.start();
 
-        // 스레드 종료 대기 (타임아웃 포함)
-        clientToServerThread.join(30000);
-        serverToClientThread.join(30000);
-    }
+        int transferTimeoutSeconds = config.getTransferTimeoutSecondsOrDefault();
+        if (transferTimeoutSeconds <= 0) {
+            clientToServerThread.join();
+            serverToClientThread.join();
+            return;
+        }
 
-    // 기존의 데이터 전송 스레드 메서드 유지
+        long timeoutMillis = transferTimeoutSeconds * 1000L;
+        long deadline = System.currentTimeMillis() + timeoutMillis;
 
-    private boolean isAllowedConnection(Socket clientSocket) {
-        String remoteAddr = clientSocket.getInetAddress().getHostAddress();
-        Locale locale = null; // 초기화
+        joinUntilDeadline(clientToServerThread, deadline);
+        joinUntilDeadline(serverToClientThread, deadline);
 
-        try {
-            // 국가 확인
-            locale = inetAddressLocator.getLocale(remoteAddr);
-            String country = locale.getCountry();
-
-            // 허용 조건 체크
-            for (String allowedCondition : config.getAllowedCountries()) {
-                switch (allowedCondition.toLowerCase()) {
-                    case "any":
-                        return true;
-                    case "localhost":
-                        if (remoteAddr.equals("127.0.0.1")) return true;
-                        break;
-                    case "private":
-                        if (isPrivateIP(remoteAddr)) return true;
-                        break;
-                    default:
-                        if (!"UNKNOWN".equals(country) && allowedCondition.equalsIgnoreCase(country)) {
-                             return true;
-                        }
-                }
-            }
-
-            return false;
-        } catch (Exception e) {
-            logger.warn("Connection check failed for IP: {}", remoteAddr, e);
-            return false;
+        if (clientToServerThread.isAlive() || serverToClientThread.isAlive()) {
+            clientToServerThread.interrupt();
+            serverToClientThread.interrupt();
+            throw new SocketException("Transfer timeout exceeded: " + transferTimeoutSeconds + "s");
         }
     }
 
-    private boolean isPrivateIP(String ipAddress) {
-        try {
-            // 로컬 네트워크 대역 체크
-            return ipAddress.startsWith("192.168.") ||
-                   ipAddress.startsWith("10.") ||
-                   ipAddress.startsWith("172.16.") ||
-                   isInSubnet(ipAddress, "192.168.0.0/24");
-        } catch (Exception e) {
-            return false;
+    private void joinUntilDeadline(Thread thread, long deadlineMillis) throws InterruptedException {
+        long remaining = deadlineMillis - System.currentTimeMillis();
+        if (remaining <= 0) {
+            return;
         }
+        thread.join(remaining);
     }
 
-    private boolean isInSubnet(String ip, String subnet) {
-        String[] parts = subnet.split("/");
-        String netAddress = parts[0];
-        int subnetBits = Integer.parseInt(parts[1]);
-
-        long ipLong = ipToLong(ip);
-        long netAddressLong = ipToLong(netAddress);
-        long mask = (-1L) << (32 - subnetBits);
-
-        return (ipLong & mask) == (netAddressLong & mask);
-    }
-
-    private long ipToLong(String ipAddress) {
-        String[] octets = ipAddress.split("\\.");
-        long result = 0;
-        for (int i = 0; i < 4; i++) {
-            result |= Long.parseLong(octets[i]) << (24 - (8 * i));
-        }
-        return result;
-    }
-
-    private Thread createDataTransferThread(
-        InputStream in,
-        OutputStream out,
-        String threadName
-    ) {
+    private Thread createDataTransferThread(InputStream in, OutputStream out, String threadName) {
         Thread thread = new Thread(() -> {
             try {
                 byte[] buffer = new byte[4096];
@@ -258,16 +260,13 @@ public class ProxyMain {
                     out.write(buffer, 0, bytesRead);
                     out.flush();
 
-                    // 스레드 인터럽트 체크
                     if (Thread.currentThread().isInterrupted()) {
                         break;
                     }
                 }
             } catch (IOException e) {
-                // 특정 예외 무시
                 if (!(e instanceof SocketException &&
-                      (e.getMessage().equals("Socket closed") ||
-                       e.getMessage().contains("Broken pipe")))) {
+                    (e.getMessage().equals("Socket closed") || e.getMessage().contains("Broken pipe")))) {
                     logger.warn("{} transfer error", threadName, e);
                 }
             } finally {
@@ -285,7 +284,6 @@ public class ProxyMain {
             }
         }, threadName);
         thread.setDaemon(true);
-
         return thread;
     }
 
@@ -293,7 +291,6 @@ public class ProxyMain {
         return config;
     }
 
-    // 서버 종료 메서드
     public void shutdown() {
         isRunning = false;
 
@@ -305,16 +302,18 @@ public class ProxyMain {
             logger.warn("Error closing server socket", e);
         }
 
-        if (executorService != null) {
-            executorService.shutdown();
-            try {
-                if (!executorService.awaitTermination(10, TimeUnit.SECONDS)) {
-                    executorService.shutdownNow();
-                }
-            } catch (InterruptedException e) {
+        executorService.shutdown();
+        try {
+            if (!executorService.awaitTermination(config.getShutdownAwaitSecondsOrDefault(), TimeUnit.SECONDS)) {
                 executorService.shutdownNow();
-                Thread.currentThread().interrupt();
             }
+        } catch (InterruptedException e) {
+            executorService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+
+        if (healthCheckExecutor != null) {
+            healthCheckExecutor.shutdownNow();
         }
     }
 }

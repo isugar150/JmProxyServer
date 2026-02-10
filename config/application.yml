@@ -1,15 +1,47 @@
 proxy:
-# - type: in # in: 인바운드, out: 아웃바운드 (추후지원)
+# - type: in # in: 인바운드, out: 고정대상 전달형 아웃바운드(일반 SOCKS/HTTP CONNECT 아님)
 #   name: sample-1 # 프록시의 이름
 #   bindPort: 8080 # 바인드할 포트
-#   forwardHost: 10.1.3.200 # 전달할 서버의 아이피
-#   forwardPort: 21 # 전달할 서버의 포트
+#   forwardHost: 10.1.3.200 # 단건 전달 서버 아이피 (lb 미사용 시)
+#   forwardPort: 21 # 단건 전달 서버 포트 (lb 미사용 시)
+#   lbHealthCheckIntervalSeconds: 5 # LB 타깃 헬스체크 주기(초), 미설정 시 10초
+#   healthCheckInitialDelaySeconds: 1 # 헬스체크 시작 지연(초), 미설정 시 1초
+#   healthCheckConnectTimeoutMillis: 2000 # 헬스체크 연결 타임아웃(ms), 미설정 시 2000
+#   healthFailThreshold: 3 # 연속 실패 N회 시 UNHEALTHY 전환, 미설정 시 3
+#   healthSuccessThreshold: 2 # 연속 성공 N회 시 HEALTHY 전환, 미설정 시 2
+#   transferTimeoutSeconds: 0 # 데이터 전송 최대시간(초), 0이면 무제한
+#   clientSoTimeoutMillis: 0 # 클라이언트 소켓 타임아웃(ms), 0이면 무제한
+#   forwardConnectTimeoutMillis: 5000 # 타깃 서버 연결 타임아웃(ms), 미설정 시 5000
+#   forwardSoTimeoutMillis: 0 # 타깃 서버 소켓 타임아웃(ms), 0이면 무제한
+#   executorCorePoolSize: 0 # 워커 코어 스레드 수, 0이면 CPU 코어 수
+#   executorMaxPoolSize: 0 # 워커 최대 스레드 수, 0이면 코어*2
+#   executorKeepAliveSeconds: 60 # 워커 유휴 스레드 유지시간(초), 미설정 시 60
+#   executorQueueCapacity: 500 # 워커 대기 큐 크기, 미설정 시 500
+#   shutdownAwaitSeconds: 10 # 종료 시 워커 대기시간(초), 미설정 시 10
+#   lb: # 로드밸런싱 대상 배열 (설정 시 forwardHost/forwardPort 대신 사용)
+#     - name: lb1 # 타깃 이름 (예: lb1, lb2 ...)
+#       forwardHost: 10.1.3.201
+#       forwardPort: 9001
+#     - name: lb2
+#       forwardHost: 10.1.3.202
+#       forwardPort: 9002
 #   allowedCountries: [private, localhost] # 국가코드: KR, JP 등등.., private: 내부망, localhost: 루프백, Any: 아무나
   - type: in
     name: sample-1
     bindPort: 8081
     forwardHost: localhost
     forwardPort: 4000
+    clientSoTimeoutMillis: 0
+    forwardConnectTimeoutMillis: 5000
+    forwardSoTimeoutMillis: 0
+    executorCorePoolSize: 0
+    executorMaxPoolSize: 0
+    executorKeepAliveSeconds: 60
+    executorQueueCapacity: 500
+    shutdownAwaitSeconds: 10
+    healthFailThreshold: 3
+    healthSuccessThreshold: 2
+    transferTimeoutSeconds: 0
     allowedCountries: [private, localhost]
   - type: in
     name: sample-2
@@ -17,3 +49,34 @@ proxy:
     forwardHost: localhost
     forwardPort: 8080
     allowedCountries: [Any]
+  - type: in
+    name: sample-lb
+    bindPort: 8083
+    allowedCountries: [Any]
+    lbHealthCheckIntervalSeconds: 5
+    healthCheckInitialDelaySeconds: 1
+    healthCheckConnectTimeoutMillis: 2000
+    clientSoTimeoutMillis: 0
+    forwardConnectTimeoutMillis: 5000
+    forwardSoTimeoutMillis: 0
+    executorCorePoolSize: 0
+    executorMaxPoolSize: 0
+    executorKeepAliveSeconds: 60
+    executorQueueCapacity: 500
+    shutdownAwaitSeconds: 10
+    healthFailThreshold: 3
+    healthSuccessThreshold: 2
+    transferTimeoutSeconds: 0
+    lb:
+      - name: lb1
+        forwardHost: localhost
+        forwardPort: 9001
+      - name: lb2
+        forwardHost: localhost
+        forwardPort: 9002
+  - type: out
+    name: sample-out
+    bindPort: 8084
+    forwardHost: example.com
+    forwardPort: 443
+    # out 타입은 allowedCountries 미설정 시 기본 허용
