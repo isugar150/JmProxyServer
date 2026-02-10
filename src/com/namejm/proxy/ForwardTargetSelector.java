@@ -23,8 +23,8 @@ public class ForwardTargetSelector {
         int size = targets.size();
         int startIndex = resolveStartIndex(size, lbStrategy, clientIp);
 
-        List<ForwardTarget> healthyTargets = new ArrayList<>();
-        List<ForwardTarget> unhealthyTargets = new ArrayList<>();
+        List<ForwardTarget> healthyTargets = new ArrayList<>(size);
+        List<ForwardTarget> unhealthyTargets = new ArrayList<>(size);
 
         for (int offset = 0; offset < size; offset++) {
             int current = (startIndex + offset) % size;

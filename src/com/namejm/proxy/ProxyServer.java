@@ -78,6 +78,7 @@ public class ProxyServer {
             }
             logger.info("Shutdown hook triggered. Shutting down proxy servers...");
             lifecycleManager.shutdownAll("shutdown hook");
+            closeGeoIpLocator();
             logger.info("All proxy servers shut down.");
         }, "ProxyShutdownHook"));
     }
@@ -157,6 +158,17 @@ public class ProxyServer {
             logger.info("GeoIP database path updated: {}", configuredPath);
         } catch (IOException e) {
             logger.error("Failed to reload GeoIP database from {}. Keeping previous database: {}", configuredPath, activeGeoIpDbPath, e);
+        }
+    }
+
+    private static void closeGeoIpLocator() {
+        try {
+            if (inetAddressLocator != null) {
+                inetAddressLocator.close();
+                inetAddressLocator = null;
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to close GeoIP locator", e);
         }
     }
 

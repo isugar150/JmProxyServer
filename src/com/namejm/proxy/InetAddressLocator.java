@@ -11,24 +11,28 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.util.Locale;
 
-public class InetAddressLocator {
+public class InetAddressLocator implements AutoCloseable {
     final private static Logger logger = LoggerFactory.getLogger(InetAddressLocator.class);
-    private static DatabaseReader reader;
+    private static volatile DatabaseReader reader;
 
     public InetAddressLocator(String databasePath) throws IOException {
         File database = new File(databasePath);
         if (!database.exists()) {
             throw new FileNotFoundException("GeoIP database file not found: " + databasePath);
         }
-        // DatabaseReader 생성 실패 시 IOException 발생
-        this.reader = new DatabaseReader.Builder(database).build();
+        DatabaseReader newReader = new DatabaseReader.Builder(database).build();
+        replaceReader(newReader);
         logger.info("GeoIP database loaded successfully from: {}", databasePath);
     }
 
     public Locale getLocale(String ipAddress) {
         try {
+            DatabaseReader currentReader = reader;
+            if (currentReader == null) {
+                return new Locale("", "UNKNOWN");
+            }
             InetAddress inetAddress = InetAddress.getByName(ipAddress);
-            CountryResponse response = reader.country(inetAddress);
+            CountryResponse response = currentReader.country(inetAddress);
             String countryCode = response.getCountry().getIsoCode();
 
             if (countryCode == null || countryCode.isEmpty()) {
@@ -43,4 +47,20 @@ public class InetAddressLocator {
         }
     }
 
+    @Override
+    public void close() {
+        replaceReader(null);
+    }
+
+    private static synchronized void replaceReader(DatabaseReader newReader) {
+        DatabaseReader oldReader = reader;
+        reader = newReader;
+        if (oldReader != null) {
+            try {
+                oldReader.close();
+            } catch (IOException e) {
+                logger.warn("Failed to close previous GeoIP database reader", e);
+            }
+        }
+    }
 }

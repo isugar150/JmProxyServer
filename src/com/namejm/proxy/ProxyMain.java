@@ -11,14 +11,17 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static ch.qos.logback.core.util.CloseUtil.closeQuietly;
 
@@ -31,6 +34,9 @@ public class ProxyMain {
     private final List<ForwardTarget> forwardTargets;
     private final ForwardTargetSelector targetSelector;
     private final TargetHealthTracker healthTracker;
+    private final ExecutorService transferExecutor;
+    private final ScheduledExecutorService transferTimeoutScheduler;
+    private final ConcurrentHashMap<String, RelayContext> relayContexts = new ConcurrentHashMap<>();
 
     private ScheduledExecutorService healthCheckExecutor;
     private ServerSocket serverSocket;
@@ -63,6 +69,20 @@ public class ProxyMain {
             workQueue,
             rejectionHandler
         );
+
+        this.transferExecutor = Executors.newCachedThreadPool(r -> {
+            Thread thread = new Thread(r);
+            thread.setName("ProxyTransfer-" + config.getName());
+            thread.setDaemon(true);
+            return thread;
+        });
+
+        this.transferTimeoutScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r);
+            thread.setName("ProxyTransferTimeout-" + config.getName());
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
     public void start() throws IOException {
@@ -100,25 +120,28 @@ public class ProxyMain {
 
     private void handleConnection(Socket clientSocket) {
         Socket upstreamSocket = null;
+        boolean relayStarted = false;
         try {
-            boolean connectionAllowed = connectionPolicy.isAllowed(clientSocket);
-            logConnection(clientSocket, connectionAllowed);
-            if (!connectionAllowed) {
+            ConnectionPolicy.PolicyDecision decision = connectionPolicy.evaluate(clientSocket);
+            logConnection(decision);
+            if (!decision.isAllowed()) {
                 return;
             }
 
-            upstreamSocket = createServerConnection(clientSocket);
-            transferData(clientSocket, upstreamSocket);
+            upstreamSocket = createServerConnection(decision.getRemoteAddr());
+            startBidirectionalRelay(clientSocket, upstreamSocket);
+            relayStarted = true;
         } catch (Exception e) {
             logger.error("Connection processing error", e);
         } finally {
-            closeQuietly(clientSocket);
-            closeQuietly(upstreamSocket);
+            if (!relayStarted) {
+                closeQuietly(clientSocket);
+                closeQuietly(upstreamSocket);
+            }
         }
     }
 
-    private Socket createServerConnection(Socket clientSocket) throws IOException {
-        String clientIp = clientSocket.getInetAddress() != null ? clientSocket.getInetAddress().getHostAddress() : "";
+    private Socket createServerConnection(String clientIp) throws IOException {
         String lbStrategy = config.getLbStrategyOrDefault();
         List<ForwardTarget> candidates = targetSelector.selectCandidates(healthTracker, lbStrategy, clientIp);
         IOException lastException = null;
@@ -181,23 +204,23 @@ public class ProxyMain {
         return socket;
     }
 
-    private void logConnection(Socket clientSocket, boolean allowed) {
+    private void logConnection(ConnectionPolicy.PolicyDecision decision) {
         try {
-            String remoteAddr = clientSocket.getInetAddress().getHostAddress();
-            int remotePort = clientSocket.getPort();
-            String country = connectionPolicy.resolveCountryCode(remoteAddr);
+            String remoteAddr = decision.getRemoteAddr();
+            int remotePort = decision.getRemotePort();
+            String country = decision.getCountryCode();
 
             if ("UNKNOWN".equals(country)) {
                 logger.info("{} - Connection {} - IP: {}, Port: {}",
                     config.getName(),
-                    allowed ? "ALLOWED" : "BLOCKED",
+                    decision.isAllowed() ? "ALLOWED" : "BLOCKED",
                     remoteAddr,
                     remotePort
                 );
             } else {
                 logger.info("{} - Connection {} - IP: {}, Port: {}, Country: {}",
                     config.getName(),
-                    allowed ? "ALLOWED" : "BLOCKED",
+                    decision.isAllowed() ? "ALLOWED" : "BLOCKED",
                     remoteAddr,
                     remotePort,
                     country
@@ -208,85 +231,102 @@ public class ProxyMain {
         }
     }
 
-    private void transferData(Socket clientSocket, Socket serverSocket) throws Exception {
-        Thread clientToServerThread = createDataTransferThread(
-            clientSocket.getInputStream(),
-            serverSocket.getOutputStream(),
-            "Client-to-Server"
-        );
-
-        Thread serverToClientThread = createDataTransferThread(
-            serverSocket.getInputStream(),
-            clientSocket.getOutputStream(),
-            "Server-to-Client"
-        );
-
-        clientToServerThread.start();
-        serverToClientThread.start();
+    private void startBidirectionalRelay(Socket clientSocket, Socket serverSocket) {
+        String relayId = config.getName() + "-" + System.nanoTime();
+        RelayContext relayContext = new RelayContext(relayId, clientSocket, serverSocket);
+        relayContexts.put(relayId, relayContext);
 
         int transferTimeoutSeconds = config.getTransferTimeoutSecondsOrDefault();
-        if (transferTimeoutSeconds <= 0) {
-            clientToServerThread.join();
-            serverToClientThread.join();
-            return;
-        }
-
-        long timeoutMillis = transferTimeoutSeconds * 1000L;
-        long deadline = System.currentTimeMillis() + timeoutMillis;
-
-        joinUntilDeadline(clientToServerThread, deadline);
-        joinUntilDeadline(serverToClientThread, deadline);
-
-        if (clientToServerThread.isAlive() || serverToClientThread.isAlive()) {
-            clientToServerThread.interrupt();
-            serverToClientThread.interrupt();
-            throw new SocketException("Transfer timeout exceeded: " + transferTimeoutSeconds + "s");
-        }
-    }
-
-    private void joinUntilDeadline(Thread thread, long deadlineMillis) throws InterruptedException {
-        long remaining = deadlineMillis - System.currentTimeMillis();
-        if (remaining <= 0) {
-            return;
-        }
-        thread.join(remaining);
-    }
-
-    private Thread createDataTransferThread(InputStream in, OutputStream out, String threadName) {
-        Thread thread = new Thread(() -> {
-            try {
-                byte[] buffer = new byte[4096];
-                int bytesRead;
-
-                while ((bytesRead = in.read(buffer)) != -1) {
-                    out.write(buffer, 0, bytesRead);
-                    out.flush();
-
-                    if (Thread.currentThread().isInterrupted()) {
-                        break;
+        if (transferTimeoutSeconds > 0) {
+            ScheduledFuture<?> timeoutFuture = transferTimeoutScheduler.schedule(
+                () -> {
+                    if (relayContext.closeOnce()) {
+                        logger.warn("{} - Transfer timeout exceeded: {}s", config.getName(), transferTimeoutSeconds);
                     }
-                }
-            } catch (IOException e) {
-                if (!(e instanceof SocketException &&
-                    (e.getMessage().equals("Socket closed") || e.getMessage().contains("Broken pipe")))) {
-                    logger.warn("{} transfer error", threadName, e);
-                }
-            } finally {
-                try {
-                    in.close();
-                } catch (IOException e) {
-                    logger.warn("Error closing input stream", e);
-                }
+                },
+                transferTimeoutSeconds,
+                TimeUnit.SECONDS
+            );
+            relayContext.setTimeoutFuture(timeoutFuture);
+        }
 
-                try {
-                    out.close();
-                } catch (IOException e) {
-                    logger.warn("Error closing output stream", e);
-                }
+        submitRelayTask(relayContext, clientSocket, serverSocket, "Client-to-Server");
+        submitRelayTask(relayContext, serverSocket, clientSocket, "Server-to-Client");
+    }
+
+    private void submitRelayTask(RelayContext relayContext, Socket sourceSocket, Socket destinationSocket, String directionName) {
+        try {
+            transferExecutor.submit(() -> relayStream(relayContext, sourceSocket, destinationSocket, directionName));
+        } catch (RejectedExecutionException e) {
+            logger.warn("{} - Transfer rejected: relay worker unavailable.", config.getName());
+            relayContext.closeOnce();
+        }
+    }
+
+    private void relayStream(RelayContext relayContext, Socket sourceSocket, Socket destinationSocket, String directionName) {
+        InputStream in = null;
+        OutputStream out = null;
+        try {
+            in = sourceSocket.getInputStream();
+            out = destinationSocket.getOutputStream();
+
+            byte[] buffer = new byte[4096];
+            int bytesRead;
+            while (!relayContext.isClosed() && (bytesRead = in.read(buffer)) != -1) {
+                out.write(buffer, 0, bytesRead);
             }
-        }, threadName);
-        thread.setDaemon(true);
-        return thread;
+        } catch (IOException e) {
+            if (!relayContext.isClosed() && !(e instanceof SocketException &&
+                ("Socket closed".equals(e.getMessage()) || e.getMessage().contains("Broken pipe")))) {
+                logger.warn("{} transfer error", directionName, e);
+            }
+        } finally {
+            relayContext.markDirectionCompleted();
+        }
+    }
+
+    private final class RelayContext {
+        private final String id;
+        private final Socket clientSocket;
+        private final Socket serverSocket;
+        private final AtomicBoolean closed = new AtomicBoolean(false);
+        private final AtomicBoolean oneDirectionCompleted = new AtomicBoolean(false);
+        private volatile ScheduledFuture<?> timeoutFuture;
+
+        private RelayContext(String id, Socket clientSocket, Socket serverSocket) {
+            this.id = id;
+            this.clientSocket = clientSocket;
+            this.serverSocket = serverSocket;
+        }
+
+        private boolean isClosed() {
+            return closed.get();
+        }
+
+        private void setTimeoutFuture(ScheduledFuture<?> timeoutFuture) {
+            this.timeoutFuture = timeoutFuture;
+        }
+
+        private void markDirectionCompleted() {
+            if (!oneDirectionCompleted.getAndSet(true)) {
+                return;
+            }
+            closeOnce();
+        }
+
+        private boolean closeOnce() {
+            if (!closed.compareAndSet(false, true)) {
+                return false;
+            }
+            ScheduledFuture<?> future = timeoutFuture;
+            if (future != null) {
+                future.cancel(false);
+            }
+            closeQuietly(clientSocket);
+            closeQuietly(serverSocket);
+            relayContexts.remove(id);
+            return true;
+        }
     }
 
     public ProxyDto getConfig() {
@@ -317,5 +357,10 @@ public class ProxyMain {
         if (healthCheckExecutor != null) {
             healthCheckExecutor.shutdownNow();
         }
+
+        transferExecutor.shutdownNow();
+        transferTimeoutScheduler.shutdownNow();
+        relayContexts.forEach((id, relayContext) -> relayContext.closeOnce());
+        relayContexts.clear();
     }
 }
