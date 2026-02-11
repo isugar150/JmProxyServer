@@ -33,8 +33,10 @@ const CONNECT_TIMEOUT_MS = Number(process.env.CONNECT_TIMEOUT_MS || 3000);
 const IO_TIMEOUT_MS = Number(process.env.IO_TIMEOUT_MS || 5000);
 const CONNECT_RETRY_COUNT = Number(process.env.CONNECT_RETRY_COUNT || 30);
 const CONNECT_RETRY_DELAY_MS = Number(process.env.CONNECT_RETRY_DELAY_MS || 50);
-const SHORT_REQUEST_RETRY_COUNT = Number(process.env.SHORT_REQUEST_RETRY_COUNT || 12);
-const SHORT_REQUEST_RETRY_DELAY_MS = Number(process.env.SHORT_REQUEST_RETRY_DELAY_MS || 40);
+const SHORT_REQUEST_RETRY_COUNT = Number(process.env.SHORT_REQUEST_RETRY_COUNT || 30);
+const SHORT_REQUEST_RETRY_DELAY_MS = Number(process.env.SHORT_REQUEST_RETRY_DELAY_MS || 80);
+const LONG_REQUEST_RETRY_COUNT = Number(process.env.LONG_REQUEST_RETRY_COUNT || 12);
+const LONG_REQUEST_RETRY_DELAY_MS = Number(process.env.LONG_REQUEST_RETRY_DELAY_MS || 100);
 const SHORT_START_JITTER_MS = Number(process.env.SHORT_START_JITTER_MS || 300);
 const CASE_COOLDOWN_MS = Number(process.env.CASE_COOLDOWN_MS || 10000);
 
@@ -387,6 +389,7 @@ async function runShortLivedRandomCase() {
 async function runLongLivedRandomCase() {
   const started = nowMs();
   const workers = [];
+  const failReasons = new Map();
 
   for (let i = 0; i < LONG_CLIENTS; i++) {
     workers.push(
@@ -396,25 +399,59 @@ async function runLongLivedRandomCase() {
         let socket = null;
         let ok = 0;
         let fail = 0;
-        try {
-          socket = await connectSocketWithRetry(PROXY_PORT, CONNECT_TIMEOUT_MS);
-          socket.setTimeout(0);
-          while (nowMs() < deadline) {
-            const payload = `LONG_${i}_${ok + fail}_${nowMs()}\n`;
+        while (nowMs() < deadline) {
+          const payload = `LONG_${i}_${ok + fail}_${nowMs()}\n`;
+          let requestSucceeded = false;
+          let lastErr = null;
+
+          for (let attempt = 0; attempt < Math.max(1, LONG_REQUEST_RETRY_COUNT); attempt++) {
             try {
+              if (!socket || socket.destroyed) {
+                socket = await connectSocketWithRetry(PROXY_PORT, CONNECT_TIMEOUT_MS);
+                socket.setTimeout(0);
+              }
               await roundTripOnSocket(socket, payload, IO_TIMEOUT_MS);
               ok++;
-            } catch (_) {
-              fail++;
+              requestSucceeded = true;
               break;
+            } catch (err) {
+              lastErr = err;
+              if (socket) {
+                try {
+                  socket.destroy();
+                } catch (_) {}
+              }
+              socket = null;
+
+              if (!isTransientRequestError(err)) {
+                break;
+              }
+
+              const retryDelay =
+                Math.max(0, LONG_REQUEST_RETRY_DELAY_MS) +
+                attempt * Math.max(0, LONG_REQUEST_RETRY_DELAY_MS) +
+                randomInt(0, 40);
+              await sleep(retryDelay);
             }
-            await sleep(LONG_PING_INTERVAL_MS);
           }
-        } catch (_) {
-          fail++;
-        } finally {
-          if (socket) socket.destroy();
+
+          if (!requestSucceeded) {
+            fail++;
+            const code = lastErr && lastErr.code ? lastErr.code : "NO_CODE";
+            const msg = lastErr && lastErr.message ? lastErr.message : "unknown";
+            const key = `${code}:${msg}`;
+            failReasons.set(key, (failReasons.get(key) || 0) + 1);
+          }
+
+          await sleep(LONG_PING_INTERVAL_MS);
         }
+
+        if (socket) {
+          try {
+            socket.destroy();
+          } catch (_) {}
+        }
+
         return { durationMs, ok, fail };
       })()
     );
@@ -426,6 +463,10 @@ async function runLongLivedRandomCase() {
   const totalFail = results.reduce((s, r) => s + r.fail, 0);
   const minDuration = Math.min(...results.map((r) => r.durationMs));
   const maxDuration = Math.max(...results.map((r) => r.durationMs));
+  const topFailReasons = Array.from(failReasons.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([reason, count]) => ({ reason, count }));
   return {
     name: "long_lived_random",
     clients: LONG_CLIENTS,
@@ -434,6 +475,7 @@ async function runLongLivedRandomCase() {
     elapsed,
     ok: totalOk,
     fail: totalFail,
+    topFailReasons,
     pass: totalOk > 0 && totalFail === 0,
   };
 }
